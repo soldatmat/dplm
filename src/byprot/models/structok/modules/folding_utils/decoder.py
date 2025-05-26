@@ -30,7 +30,7 @@ from torch.nn import LayerNorm
 from byprot.utils.config import merge_config
 
 from .categorical_mixture import categorical_lddt
-from .esmfold import ESMFold
+from esm.esmfold.v1.esmfold import ESMFold # fixed from `from .esmfold import ESMFold``
 from .misc import batch_encode_sequences, collate_dense_tensors, output_to_pdb
 from .trunk import FoldingTrunk, FoldingTrunkConfig
 
