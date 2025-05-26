@@ -1,0 +1,11 @@
+_target_: martsdb
+
+# data_dir: ${data_dir} # data_dir is specified in config.yaml
+data_path: ${paths.data_dir}/MARTS-DB/2025-04-24/TPS_sequences.csv
+
+# dataloader related
+# max_tokens: 6000
+max_len: 1004 # 1022
+num_workers: 8 # 8
+
+mini_run: false
