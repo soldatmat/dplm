@@ -16,8 +16,7 @@ project: "TPS_DPLM_150m_stage3"
 name: "tps_dplm_150m_stage3"
 
 datamodule:
-  max_tokens: 6000
-  max_len: 1022
+  max_tokens: 8192
 
 model:
   _target_: dplm
