@@ -5,7 +5,7 @@
 
 defaults:
   - /datamodule: martsdb
-  - /callbacks: lm
+  - /callbacks: lm_tps
   - /trainer: ddp_bf16
 
 # all parameters below will be merged with parameters from default configurations set above
