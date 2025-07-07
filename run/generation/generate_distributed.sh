@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# Usage: ./generate_distributed.sh data.csv
-
 CSV_FILE=/storage/brno2/home/soldatmat/documents/terpene_synthases/output/dplm/sampled_lengths.csv
 MODEL=/storage/brno2/home/soldatmat/documents/terpene_synthases/dplm/logs/TPS_dplm_650m_stage3_run_1/checkpoints/best.ckpt
 SAVETO=/storage/brno2/home/soldatmat/documents/terpene_synthases/output/dplm/TPS_dplm_650m_stage3_run_1
@@ -26,8 +24,17 @@ mkdir -p $SAVETO
 # fi
 
 tail -n +2 "$CSV_FILE" | while IFS=, read -r length count; do
+    # Trim whitespace, newlines, and carriage returns
+    length=$(echo "$length" | tr -d '\r' | xargs)
+    count=$(echo "$count" | tr -d '\r' | xargs)
+
     # echo "length: $length, count: $count"
-    qsub -v MODEL="$MODEL",SAVETO="$SAVETO",SEQ_LENS="$length",NUM_SEQS="$count" run_generate_dplm.sh
+    job_name=TPS_dplm_generate_sl_"$length"_ns_"$count"_t_"$TEMPERATURE"
+    echo $job_name
+
+    qsub -v MODEL="$MODEL",SAVETO="$SAVETO",SEQ_LENS="$length",NUM_SEQS="$count",TEMPERATURE="$TEMPERATURE" \
+        -N $job_name \
+        run_generate_dplm.sh
 done
 
 
