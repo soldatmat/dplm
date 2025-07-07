@@ -349,8 +349,12 @@ class DiffusionProteinLanguageModel(nn.Module):
             _scores, _tokens = logits.max(-1)
         elif sampling_strategy == "gumbel_argmax":
             noise_scale = 1.0
+            # DPLM original code (always uses temperature=0.0):
+            # _tokens, _scores = stochastic_sample_from_categorical(
+            #     logits, temperature=0.0, noise_scale=noise_scale
+            # )
             _tokens, _scores = stochastic_sample_from_categorical(
-                logits, temperature=0.0, noise_scale=noise_scale
+                logits, temperature=temperature, noise_scale=noise_scale
             )
 
             if not disable_resample:

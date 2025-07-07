@@ -104,6 +104,7 @@ def generate(args):
                 max_iter=max_iter,
                 sampling_strategy=args.sampling_strategy,
                 partial_masks=partial_mask,
+                temperature=args.temperature,
             )
         output_tokens = outputs
 
