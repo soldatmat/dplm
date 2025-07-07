@@ -12,8 +12,8 @@ defaults:
 # this allows you to overwrite only specified parameters
 
 # name of the run determines folder name in logs
-project: "TPS_DPLM_150m_stage3"
-name: "tps_dplm_150m_stage3"
+project: "TPS_DPLM_3b_stage3"
+name: "tps_dplm_3b_stage3"
 
 datamodule:
   max_tokens: 4096 # original 6000
@@ -32,10 +32,10 @@ model:
     modules_to_save: lm_head,esm.embeddings
   net:
     arch_type: esm
-    name: airkingbd/dplm_150m
+    name: airkingbd/dplm_3b
     dropout: 0.1
     pretrain: true
-    pretrained_model_name_or_path: airkingbd/dplm_150m
+    pretrained_model_name_or_path: airkingbd/dplm_3b
 
 task:
   _target_: lm/dplm
