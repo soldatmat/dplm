@@ -1,9 +1,11 @@
-# Usage example:
-# python generate_dplm.py \
-#   --model_name /home2/soldat/documents/dplm/logs/TPS_dplm_150m_stage3_run_6/checkpoints/best.ckpt \
-#   --saveto /home2/soldat/documents/terpene_synthases/output/dplm/TPS_dplm_150m_stage3_run_6 \
-#   --seq_lens 100 200 300 400 500 \
-#   --num_seqs 40 \
+"""
+Usage example:
+python generate_dplm_fixed.py \
+  --model_name /home2/soldat/documents/dplm/logs/TPS_dplm_150m_stage3_run_6/checkpoints/best.ckpt \
+  --saveto /home2/soldat/documents/terpene_synthases/output/dplm/TPS_dplm_150m_stage3_run_6 \
+  --seq_lens 100 200 300 400 500 \
+  --num_seqs 40
+"""
 
 import argparse
 import os
