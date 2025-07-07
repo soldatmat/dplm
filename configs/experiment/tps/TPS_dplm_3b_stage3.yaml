@@ -5,7 +5,7 @@
 
 defaults:
   - /datamodule: martsdb
-  - /callbacks: lm
+  - /callbacks: lm_tps
   - /trainer: ddp_fp16
 
 # all parameters below will be merged with parameters from default configurations set above
@@ -16,7 +16,7 @@ project: "TPS_DPLM_3b_stage3"
 name: "tps_dplm_3b_stage3"
 
 datamodule:
-  max_tokens: 4096 # original 6000
+  max_tokens: 1024 # original 6000
   # max_len: 1022
 
 model:
@@ -67,7 +67,7 @@ task:
 
 train:
   seed: 42
-  lr: 0.0004 # original 0.00004
+  lr: 0.00004 # original 0.00004
   monitor: "val/loss"
   mode: "min"
   patience: 1000
@@ -79,8 +79,8 @@ trainer:
   num_sanity_val_steps: 0
   reload_dataloaders_every_n_epochs: 1
   use_distributed_sampler: false
-  max_steps: 200_000 # original 100_000
-  accumulate_grad_batches: 1
+  max_steps: 100_000 # original 100_000
+  accumulate_grad_batches: 6
   check_val_every_n_epoch: null
   val_check_interval: 1000
   enable_progress_bar: true

@@ -5,7 +5,7 @@
 
 defaults:
   - /datamodule: martsdb
-  - /callbacks: lm
+  - /callbacks: lm_tps
   - /trainer: ddp_fp16
 
 # all parameters below will be merged with parameters from default configurations set above
@@ -16,7 +16,7 @@ project: "TPS_DPLM_150m_stage3"
 name: "tps_dplm_150m_stage3"
 
 datamodule:
-  max_tokens: 4096 # original 6000
+  max_tokens: 8192 # original 6000
   # max_len: 1022
 
 model:
