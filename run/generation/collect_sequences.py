@@ -13,10 +13,11 @@ def main(args):
     records = []
     for fasta_file in fasta_files:
         for record in SeqIO.parse(fasta_file, "fasta"):
+            processed_sequence = str(record.seq).replace("<null_1>", "").replace(".", "").replace("-", "")
             records.append({
                 "id": record.id,
                 "description": record.description,
-                "sequence": str(record.seq)
+                "sequence": processed_sequence
             })
 
     csv_path = os.path.join(args.sequence_folder, "all_sequences.csv")
