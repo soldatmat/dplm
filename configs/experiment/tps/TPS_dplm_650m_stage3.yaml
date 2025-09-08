@@ -70,7 +70,7 @@ train:
   lr: 0.0004 # original 0.00004
   monitor: "val/loss"
   mode: "min"
-  patience: 1000
+  patience: 10000
 
 trainer:
   min_epochs: 10
