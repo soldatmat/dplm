@@ -108,13 +108,6 @@ class ApproxBatchSampler(BatchSampler):
         self.max_square_tokens = max_square_tokens
         self.max_len = max_len
         self.batches = self._build_batches()
-        # TODO delete
-        # print(len(self.batches))
-        # print(len(self.batches[0]))
-        # print(len(self.batches[1]))
-        # print(len(self.batches[2]))
-        # print(len(self.batches[-1]))
-        # exit()
         
     def _build_batches(self):
         batches = []
@@ -280,7 +273,6 @@ class DPLMCollater(object):
                 'targets':    batch['input_ids'].clone()
             }
         return batch
-
 
 def setup_dataloader(
         ds: MartsDBDataset,  
