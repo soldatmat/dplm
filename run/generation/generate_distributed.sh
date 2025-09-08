@@ -2,6 +2,8 @@
 
 CSV_FILE="/storage/brno2/home/soldatmat/documents/terpene_synthases/output/dplm/sampled_lengths_1000.csv"
 MODEL_NAME="TPS_dplm_650m_stage3_run_3"
+FROM_HUGGINGFACE=False
+ARCHITECURE="DiffusionProteinLanguageModel" # DiffusionProteinLanguageModel, DPLMClass
 CHECKPOINT="N-Step-Checkpoint_epoch=86_step=20000.ckpt"
 MODEL="/storage/brno2/home/soldatmat/documents/terpene_synthases/dplm/logs/${MODEL_NAME}/checkpoints/${CHECKPOINT}"
 TEMPERATURE=8.0
@@ -14,7 +16,7 @@ if [[ ! -f "$CSV_FILE" ]]; then
     exit 1
 fi
 
-mkdir -p $SAVETO
+mkdir -p "$SAVETO"
 
 
 
@@ -44,7 +46,7 @@ tail -n +2 "$CSV_FILE" | while IFS=, read -r length count; do
     job_name=generate_"$MODEL_NAME"_sl_"$length"_ns_"$count"_t_"$TEMPERATURE"
     echo $job_name
 
-    qsub -v MODEL="$MODEL",SAVETO="$SAVETO",SEQ_LENS="$length",NUM_SEQS="$count",TEMPERATURE="$TEMPERATURE" \
+    qsub -v MODEL="$MODEL",FROM_HUGGINGFACE="$FROM_HUGGINGFACE",SAVETO="$SAVETO",SEQ_LENS="$length",NUM_SEQS="$count",TEMPERATURE="$TEMPERATURE" \
         -N $job_name \
         -l walltime="$walltime" \
         run_generate_dplm.sh
