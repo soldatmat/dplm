@@ -56,15 +56,11 @@ class MartsDBDataModule(LightningDataModule):
 
         # load datasets only if they're not loaded already
         if stage == "fit":
-            # TODO add correct args to MartsDBDataset initialization
-            # TODO then modify the remaining two occurrences of MartsDBDataset according to this one
             self.train_dataset = MartsDBDataset(
                 csv_file=self.hparams.data_path,
                 split=None,
                 max_len=self.hparams.max_len,
             )
-            # TODO add correct args to MartsDBDataset initialization
-            # TODO ? remove valid_dataset (it is the same as train_dataset, might be redundant if metrics are calculated on train)
             self.valid_dataset = MartsDBDataset(
                 csv_file=self.hparams.data_path,
                 split=None,
@@ -83,10 +79,9 @@ class MartsDBDataModule(LightningDataModule):
                 valid_indices = np.random.choice(vindices, mini_size)
                 self.valid_dataset = Subset(self.valid_dataset, valid_indices)
         elif stage == "test" or stage == "predict":
-            # TODO add correct args to MartsDBDataset initialization
             self.test_dataset = MartsDBDataset(
                 csv_file=self.hparams.data_path,
-                split="valid",
+                split=None,
                 max_len=self.hparams.max_len,
             )
         else:
