@@ -1,0 +1,16 @@
+_target_: martsdb_class
+
+# data_dir: ${data_dir} # data_dir is specified in config.yaml
+data_path: ${paths.data_dir}/MARTS-DB/2025-06-23/TPS_first_cyclization.csv
+
+# alphabet related # TODO check if alphabet parameters make sense
+alphabet:
+  name: esm
+#   featurizer: cath
+
+# dataloader related
+# max_tokens: 6000
+max_len: 1022
+num_workers: 8 # 8 # TODO probably should be 0 (=automatic?)
+
+mini_run: false
