@@ -15,6 +15,7 @@ import torch
 
 from byprot import utils
 from byprot.models.dplm.dplm import DiffusionProteinLanguageModel
+from byprot.models.dplm.dplm_class import DPLMClass
 
 
 def format_check(args):
@@ -80,9 +81,23 @@ def initialize_generation(
 
 
 def generate(args):
-    model = DiffusionProteinLanguageModel.from_pretrained(
-        args.model_name, from_huggingface=False
-    )
+    if args.architecture == "DiffusionProteinLanguageModel":
+        model = DiffusionProteinLanguageModel.from_pretrained(
+            args.model_name, from_huggingface=args.from_huggingface
+        )
+    elif args.architecture == "DPLMClass":
+        if args.from_huggingface == True:
+            raise ValueError(
+                "DPLMClass does not support from_huggingface=True."
+            )
+        model = DPLMClass.from_pretrained(
+            args.model_name,
+        )
+    else:
+        raise ValueError(
+            f"Unsupported architecture: {args.architecture}. "
+            "Please choose either 'DiffusionProteinLanguageModel' or 'DPLMClass'."
+        )
     tokenizer = model.tokenizer
     model = model.eval()
     model = model.cuda()
@@ -138,6 +153,8 @@ def main():
     parser.add_argument(
         "--model_name", type=str, default="airkingbd/dplm_150m"
     )
+    parser.add_argument("--from_huggingface", type=bool, default=True)
+    parser.add_argument("--architecture", type=str, default="DiffusionProteinLanguageModel")
     parser.add_argument("--num_seqs", type=int, default=40)
     parser.add_argument("--seq_lens", nargs="*", type=int)
     parser.add_argument("--saveto", type=str, default="gen.fasta")

@@ -20,6 +20,8 @@ cd $DATADIR
 
 python generate_dplm_fixed.py \
   --model_name "$MODEL" \
+  --from_huggingface "$FROM_HUGGINGFACE" \
+  --architecture "$ARCHITECTURE" \
   --saveto  "$SAVETO" \
   --seq_lens "$SEQ_LENS" \
   --num_seqs "$NUM_SEQS" \
