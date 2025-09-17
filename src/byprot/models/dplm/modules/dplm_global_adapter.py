@@ -36,12 +36,13 @@ class DPLMWithGlobalAdapterConfig:
     num_diffusion_timesteps: int = field(default=100)
     adapter_dropout: float = field(default=0.1)
     encoder_d_model: int = field(default=512)
+    encoder_conditioning_mode: str = field(default="cross_attention")  # cross_attention, expanded_cross_attention, sum, ignore
     dplm_name: str = field(default="")
     from_huggingface: bool = field(default=True)
     net: NetConfig = field(default=NetConfig())
 
 
-class DPLMWithConditionalGlobalAdatper(nn.Module):
+class DPLMWithConditionalGlobalAdapter(nn.Module):
     _default_cfg = DPLMWithGlobalAdapterConfig()
 
     @classmethod
@@ -95,8 +96,8 @@ class DPLMWithConditionalGlobalAdatper(nn.Module):
         )
 
         # trivial conditioning hack (repeats the global embedding as if it was a number of local embeddings)
-        encoder_hidden_states = encoder_hidden_states.unsqueeze(1).expand(-1, batch["prev_tokens"].size(1), -1)
-        # size (16, 640) -> (16, 954, 640) # batch_size=16, seq_len=954, embedding_dim=512
+        # encoder_hidden_states = encoder_hidden_states.unsqueeze(1).expand(-1, batch["prev_tokens"].size(1), -1)
+        # size (16, 640) -> (16, 954, 640) # batch_size=16, seq_len=954, embedding_dim=640
 
         # encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
         # size (16, 640) -> (16, 1, 640)
@@ -227,6 +228,14 @@ class GlobalAdapterLayer(nn.Module):
             config.hidden_size, eps=config.layer_norm_eps
         )
 
+        self.conditioning_mode = getattr(cfg, "encoder_conditioning_mode", "cross_attention")
+        self.conditioning_chunk = {
+            "cross_attention": self.cross_attention_conditioning_chunk,
+            "expanded_cross_attention": self.expanded_cross_attention_conditioning_chunk,
+            "sum": self.sum_conditioning_chunk,
+            "ignore": self.ignore_conditioning_chunk,
+        }[self.conditioning_mode]
+
     def forward(
         self,
         hidden_states,
@@ -261,30 +270,8 @@ class GlobalAdapterLayer(nn.Module):
         # adapter begins
         residual = layer_output
 
-        # A) cross-attention
-        dtype = torch.float32
-        extended_encoder_attention_mask = encoder_attention_mask[
-            :, None, None, :
-        ]
-        extended_encoder_attention_mask = extended_encoder_attention_mask.to(
-            dtype=dtype
-        )  # fp16 compatibility
-        extended_encoder_attention_mask = (
-            1.0 - extended_encoder_attention_mask
-        ) * torch.finfo(dtype).min
-        cross_attention_outputs = self.adapter_crossattention(
-            hidden_states=layer_output,
-            encoder_hidden_states=encoder_hidden_states,  # encoder_hidden_states_proj,
-            # encoder_attention_mask=attention_mask #if not attention_mask.any() else None,#encoder_attention_mask,
-            encoder_attention_mask=extended_encoder_attention_mask,  # attention_mask, #
-        )
-        conditioning_output = cross_attention_outputs[0]
-
-        # B) simple sum
-        # conditioning_output = layer_output + encoder_hidden_states
-
-        # C) debug, ignore conditioning
-        # conditioning_output = layer_output
+        # conditioning with encoder output
+        conditioning_output = self.conditioning_chunk(layer_output, encoder_hidden_states, encoder_attention_mask)
 
         # second feed forward chunk
         ffn_output = self.adapter_feed_forward_chunk(conditioning_output)
@@ -306,6 +293,68 @@ class GlobalAdapterLayer(nn.Module):
         layer_output = self.adapter_output(
             intermediate_output, attention_output
         )
+        return layer_output
+    
+    """
+    Cross-attention with the singular global embedding
+    """
+    def cross_attention_conditioning_chunk(self, layer_output, encoder_hidden_states, encoder_attention_mask):
+        encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
+        dtype = torch.float32
+        extended_encoder_attention_mask = encoder_attention_mask[
+            :, None, :, None,
+        ]
+        extended_encoder_attention_mask = extended_encoder_attention_mask.to(
+            dtype=dtype
+        )  # fp16 compatibility
+        extended_encoder_attention_mask = (
+            1.0 - extended_encoder_attention_mask
+        ) * torch.finfo(dtype).min
+        cross_attention_outputs = self.adapter_crossattention(
+            hidden_states=layer_output,
+            encoder_hidden_states=encoder_hidden_states,  # encoder_hidden_states_proj,
+            # encoder_attention_mask=attention_mask #if not attention_mask.any() else None,#encoder_attention_mask,
+            encoder_attention_mask=extended_encoder_attention_mask,  # attention_mask, #
+        )
+        conditioning_output = cross_attention_outputs[0]
+        return conditioning_output
+    
+    """
+    Cross-attention with copied global embeddings
+    """
+    def expanded_cross_attention_conditioning_chunk(self, layer_output, encoder_hidden_states, encoder_attention_mask):
+        encoder_hidden_states = encoder_hidden_states.unsqueeze(1).expand(-1, layer_output.size(1), -1)
+        dtype = torch.float32
+        extended_encoder_attention_mask = encoder_attention_mask[
+            :, None, None, :
+        ]
+        extended_encoder_attention_mask = extended_encoder_attention_mask.to(
+            dtype=dtype
+        )  # fp16 compatibility
+        extended_encoder_attention_mask = (
+            1.0 - extended_encoder_attention_mask
+        ) * torch.finfo(dtype).min
+        cross_attention_outputs = self.adapter_crossattention(
+            hidden_states=layer_output,
+            encoder_hidden_states=encoder_hidden_states,  # encoder_hidden_states_proj,
+            # encoder_attention_mask=attention_mask #if not attention_mask.any() else None,#encoder_attention_mask,
+            encoder_attention_mask=extended_encoder_attention_mask,  # attention_mask, #
+        )
+        conditioning_output = cross_attention_outputs[0]
+        return conditioning_output
+    
+    """
+    Trivial sum conditioning for debug.
+    """
+    def sum_conditioning_chunk(self, layer_output, encoder_hidden_states, encoder_attention_mask):
+        encoder_hidden_states = encoder_hidden_states.unsqueeze(1).expand(-1, layer_output.size(1), -1)
+        conditioning_output = layer_output + encoder_hidden_states
+        return conditioning_output
+    
+    """
+    Ignore conditioning for debug.
+    """
+    def ignore_conditioning_chunk(self, layer_output, encoder_hidden_states, encoder_attention_mask):
         return layer_output
 
 

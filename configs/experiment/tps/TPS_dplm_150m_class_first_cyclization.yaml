@@ -5,7 +5,7 @@
 
 defaults:
   - /datamodule: martsdb_class
-  - /callbacks: fixedbb_tps # TODO study more closely
+  - /callbacks: fixedbb_tps
   - /trainer: ddp_fp16
 
 # all parameters below will be merged with parameters from default configurations set above
@@ -30,6 +30,7 @@ model:
     dplm_name: airkingbd/dplm_150m
     # dplm_name: /storage/brno2/home/soldatmat/documents/terpene_synthases/dplm/logs/TPS_dplm_150m_stage3_run_8/checkpoints/best.ckpt
     encoder_d_model: ${model.encoder.embedding_dim}
+    encoder_conditioning_mode: "cross_attention"
   encoder:
     _target_: class_encoder
     output_logits: ${task.learning.output_encoder_logits}

@@ -15,7 +15,7 @@ from byprot import utils
 from byprot.models import register_model
 from byprot.models.dplm.modules.dplm_global_adapter import (
     DPLMWithGlobalAdapterConfig,
-    DPLMWithConditionalGlobalAdatper,
+    DPLMWithConditionalGlobalAdapter,
 )
 from byprot.models.utils import (
     stochastic_sample_from_categorical,
@@ -42,7 +42,7 @@ class DPLMClass(nn.Module):
         self.encoder = utils.instantiate_from_config(
             cfg=cfg.encoder, group="model"
         )
-        self.decoder = DPLMWithConditionalGlobalAdatper.from_pretrained(
+        self.decoder = DPLMWithConditionalGlobalAdapter.from_pretrained(
             cfg=cfg.decoder,
         )
 
