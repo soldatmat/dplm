@@ -88,6 +88,10 @@ class ConditionalDPLMTrainingTask(TaskLitModule):
 
         if self.stage == "fit":
             log.info(f"\n{self.model}")
+            log.info("For the following parameters of the model, requires_grad is set to True:")
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    log.info(name)
         elif self.stage == "test":
             self.test_step_outputs = []
 
