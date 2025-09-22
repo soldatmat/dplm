@@ -13,19 +13,16 @@ from byprot.models import register_model
 class ClassEncoderConfig:
     output_logits: bool = False
     embedding_dim: int = 512
-    n_classes: int = 0 # Has to be specified in the config
+    n_classes: int = 0 # has to be specified in the config
 
 
 @register_model("class_encoder")
 class ClassEncoder(torch.nn.Module):
-    def __init__(self, n_classes, embedding_dim, freeze=True, output_logits=False,):
+    def __init__(self, n_classes, embedding_dim, output_logits=False):
         super().__init__()
         self.embedding_dim = embedding_dim
 
         self.encoder = torch.nn.Embedding(n_classes, self.embedding_dim)
-
-        # if freeze:
-            # TODO
 
         # alphabet = esm.data.Alphabet.from_architecture("ESM-1b")
         if output_logits:

@@ -19,6 +19,8 @@ from byprot.modules import metrics
 from byprot.tasks import TaskLitModule, register_task
 from byprot.utils.config import compose_config as Cfg
 from byprot.utils.config import merge_config
+from byprot.utils.optim import get_optimizer
+from byprot.utils.lr_scheduler import get_scheduler
 
 log = utils.get_logger(__name__)
 
@@ -88,12 +90,64 @@ class ConditionalDPLMTrainingTask(TaskLitModule):
 
         if self.stage == "fit":
             log.info(f"\n{self.model}")
+        elif self.stage == "test":
+            self.test_step_outputs = []
+    
+    # -------# Optimizers & Lr Schedulers #-------- #
+    def configure_optimizers(self):
+        """Choose what optimizers and learning-rate schedulers to use in your
+        optimization. Normally you'd need one. But in the case of GANs or
+        similar you might have multiple.
+
+        See examples here:
+            https://pytorch-lightning.readthedocs.io/en/latest/common/lightning_module.html#configure-optimizers
+        """
+        optimizer = get_optimizer(
+            self.hparams.optimizer,
+            [
+                self.trainer.model.module.model.decoder.net.esm.encoder.layer[-1].adapter_crossattention.self.value.lora_A,
+                self.trainer.model.module.model.decoder.net.esm.encoder.layer[-1].adapter_crossattention.self.value.lora_B,
+            ]
+        )
+
+        def count_optimized_params(optimizer, model):
+                optimized = set()
+                param_id_to_name = {id(p): n for n, p in model.named_parameters()}
+                for group in optimizer.param_groups:
+                    for p in group["params"]:
+                        if p.requires_grad:
+                            name = param_id_to_name.get(id(p), "Unnamed")
+                            optimized.add((p, name))
+
+                return sum(p.numel() for p, _ in optimized), optimized
+
+        def print_trained_params(optimizer, model):
+            n_optimized_params, optimized_params = count_optimized_params(optimizer, model)
+
+            log.info(f"Trainable params (requires_grad): {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
+            log.info(f"Optimized params (in optimizer & requires_grad): {n_optimized_params:,}")
             log.info("For the following parameters of the model, requires_grad is set to True:")
             for name, param in self.model.named_parameters():
                 if param.requires_grad:
-                    log.info(name)
-        elif self.stage == "test":
-            self.test_step_outputs = []
+                    log.info(f"   {name}, {param.size()} = {param.numel()} params")
+            log.info("The following parameters of the model are optimized by the optimizer (& have requires_grad=True):")
+            for param, p_name in optimized_params:
+                log.info(f"   {p_name}, {param.size()} = {param.numel()} params")
+        
+        print_trained_params(optimizer, self.trainer.model.module.model)
+
+        if (
+            "lr_scheduler" in self.hparams
+            and self.hparams.lr_scheduler is not None
+        ):
+            lr_scheduler, extra_kwargs = get_scheduler(
+                self.hparams.lr_scheduler, optimizer
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {"scheduler": lr_scheduler, **extra_kwargs},
+            }
+        return optimizer
 
     def on_test_epoch_start(self) -> None:
         if self.hparams.generator.eval_sc:

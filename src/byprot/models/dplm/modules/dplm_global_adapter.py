@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 
+import math
 from copy import deepcopy
 from dataclasses import dataclass, field
 
@@ -40,6 +41,7 @@ class DPLMWithGlobalAdapterConfig:
     dplm_name: str = field(default="")
     from_huggingface: bool = field(default=True)
     net: NetConfig = field(default=NetConfig())
+    lora: bool = field(default=True)
 
 
 class DPLMWithConditionalGlobalAdapter(nn.Module):
@@ -221,6 +223,14 @@ class GlobalAdapterLayer(nn.Module):
         self.adapter_intermediate = EsmIntermediate(config)
         self.adapter_output = EsmOutput(config)
 
+        if cfg.lora:
+            value = self.adapter_crossattention.self.value
+            self.adapter_crossattention.self.value = LoraLinear(
+                value.weight,
+                bias=value.bias,
+            )
+            del value
+
         self.LayerNorm = nn.LayerNorm(
             config.hidden_size, eps=config.layer_norm_eps
         )
@@ -373,3 +383,31 @@ class GlobalAdapterEsmAttention(EsmAttention):
     def __init__(self, config, kdim=None, vdim=None):
         super().__init__(config)
         self.self = GlobalAdapterEsmSelfAttention(config, kdim=kdim, vdim=vdim)
+
+
+class LoraLinear(nn.Module):
+    def __init__(self, weight, bias=None, r=1):
+        super().__init__()
+        self.in_features = weight.size(1)
+        self.out_features = weight.size(0)
+        self.r = r
+        self.weight = nn.Parameter(weight)
+        if bias is not None:
+            self.bias = nn.Parameter(bias)
+        else:
+            self.register_parameter('bias', None)
+        
+        # LoRA parameters
+        self.lora_A = nn.Parameter(torch.empty(self.r, self.in_features, requires_grad=True, device=weight.device))
+        self.lora_B = nn.Parameter(torch.empty(self.out_features, self.r, requires_grad=True, device=weight.device))
+        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_B)
+    
+    def __repr__(self):
+        return f"LoraLinear(in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}, r={self.r})"
+
+    def forward(self, x):
+        lora_update = self.lora_B @ self.lora_A
+        updated_weights = self.weight + lora_update
+        result = nn.functional.linear(x, updated_weights, self.bias)
+        return result
