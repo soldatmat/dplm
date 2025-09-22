@@ -109,12 +109,9 @@ def generate(args):
             args.num_seqs, seq_len, tokenizer, device
         )
         partial_mask = input_tokens.ne(model.mask_id)
-        batch = {
-            "input_ids": input_tokens,
-        }
         with torch.cuda.amp.autocast():
             outputs = model.generate(
-                batch, # input_tokens=input_tokens,
+                input_tokens=input_tokens,
                 tokenizer=tokenizer,
                 max_iter=max_iter,
                 sampling_strategy=args.sampling_strategy,
@@ -123,14 +120,11 @@ def generate(args):
             )
         output_tokens = outputs
 
-        # print(output_tokens[0].shape) # [40, 102] # ? 40 sequences, 100 sequence length
-        # print(output_tokens[1].shape) # [40, 102]
-
         print("final:")
         output_results = [
             "".join(seq.split(" "))
             for seq in tokenizer.batch_decode(
-                output_tokens[0], skip_special_tokens=True
+                output_tokens, skip_special_tokens=True
             )
         ]
         pprint(output_results)
