@@ -12,6 +12,7 @@
 export CUDA_VISIBLE_DEVICES=0,
 
 DATADIR=/storage/brno2/home/soldatmat/documents/terpene_synthases/dplm
+CACHE_DIR=/storage/brno2/home/soldatmat/.cache/huggingface/hub
 
 module add mambaforge
 mamba activate /storage/brno2/home/soldatmat/.conda/envs/dplm
@@ -25,6 +26,7 @@ python generate_dplm_fixed.py \
   --saveto  "$SAVETO" \
   --seq_lens "$SEQ_LENS" \
   --num_seqs "$NUM_SEQS" \
-  --temperature "$TEMPERATURE"
+  --temperature "$TEMPERATURE" \
+  --cache_dir "$CACHE_DIR"
 
 clean_scratch

@@ -83,7 +83,7 @@ def initialize_generation(
 def generate(args):
     if args.architecture == "DiffusionProteinLanguageModel":
         model = DiffusionProteinLanguageModel.from_pretrained(
-            args.model_name, from_huggingface=args.from_huggingface
+            args.model_name, net_override={"cache_dir": args.cache_dir}, from_huggingface=args.from_huggingface
         )
     elif args.architecture == "DPLMClass":
         if args.from_huggingface == True:
@@ -95,7 +95,7 @@ def generate(args):
         )
     else:
         raise ValueError(
-            f"Unsupported architecture: {args.architecture}. "
+            f"Unsupported architecture: {args.architecture}."
             "Please choose either 'DiffusionProteinLanguageModel' or 'DPLMClass'."
         )
     tokenizer = model.tokenizer
@@ -165,6 +165,7 @@ def main():
     # --cond_seq ALVE EME
     parser.add_argument("--cond_position", nargs="*", type=str)
     parser.add_argument("--cond_seq", nargs="*", type=str)
+    parser.add_argument("--cache_dir", type=str, default=None)
     args = parser.parse_args()
 
     generate(args)
