@@ -217,7 +217,7 @@ class DiffusionProteinLanguageModel(nn.Module):
 
             return output_tokens, output_scores
 
-    def resample(self, _tokens, _scores, ratio, scale):
+    def resample(self, _tokens, _scores, ratio, scale, temperature):
         """Rejection sampling for eliminating the unexpected repeat patterns in
         generation results, e.g., GGGGG.... We first calculate the frequency of
         all tokens,
@@ -288,7 +288,7 @@ class DiffusionProteinLanguageModel(nn.Module):
                 resample_tokens,
                 resample_scores,
             ) = stochastic_sample_from_categorical(
-                resample_logits, temperature=0.0, noise_scale=noise_scale
+                resample_logits, temperature=temperature, noise_scale=noise_scale
             )
             resample_input.masked_scatter_(
                 resample_input_mask, resample_tokens[resample_input_mask]
@@ -347,10 +347,7 @@ class DiffusionProteinLanguageModel(nn.Module):
             _scores, _tokens = logits.max(-1)
         elif sampling_strategy == "gumbel_argmax":
             noise_scale = 1.0
-            # DPLM original code (always uses temperature=0.0):
-            # _tokens, _scores = stochastic_sample_from_categorical(
-            #     logits, temperature=0.0, noise_scale=noise_scale
-            # )
+            temperature = temperature # original DPLM fixes temperature=0.0
             _tokens, _scores = stochastic_sample_from_categorical(
                 logits, temperature=temperature, noise_scale=noise_scale
             )
@@ -358,7 +355,7 @@ class DiffusionProteinLanguageModel(nn.Module):
             if not disable_resample:
                 # rejection sampling for eliminating the repeat pattern in the sampled sequence
                 self.resample(
-                    _tokens, _scores, ratio=resample_ratio, scale=1.0
+                    _tokens, _scores, ratio=resample_ratio, scale=1.0, temperature=temperature,
                 )
         else:
             raise NotImplementedError
