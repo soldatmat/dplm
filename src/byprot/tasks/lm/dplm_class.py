@@ -102,13 +102,19 @@ class ConditionalDPLMTrainingTask(TaskLitModule):
         See examples here:
             https://pytorch-lightning.readthedocs.io/en/latest/common/lightning_module.html#configure-optimizers
         """
-        optimizer = get_optimizer(
-            self.hparams.optimizer,
-            [
-                self.trainer.model.module.model.decoder.net.esm.encoder.layer[-1].adapter_crossattention.self.value.lora_A,
-                self.trainer.model.module.model.decoder.net.esm.encoder.layer[-1].adapter_crossattention.self.value.lora_B,
-            ]
-        )
+        if self.hparams.model.decoder.lora:
+            optimizer = get_optimizer(
+                self.hparams.optimizer,
+                list(self.trainer.model.module.model.encoder.parameters()) +
+                [
+                    self.trainer.model.module.model.decoder.net.esm.encoder.layer[-1].adapter_crossattention.self.value.lora_A,
+                    self.trainer.model.module.model.decoder.net.esm.encoder.layer[-1].adapter_crossattention.self.value.lora_B,
+                ]
+            )
+        else:
+            optimizer = get_optimizer(
+                self.hparams.optimizer, self.trainer.model.parameters()
+            )
 
         def count_optimized_params(optimizer, model):
                 optimized = set()
