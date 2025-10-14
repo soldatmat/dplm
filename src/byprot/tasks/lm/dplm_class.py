@@ -107,8 +107,7 @@ class ConditionalDPLMTrainingTask(TaskLitModule):
                 self.hparams.optimizer,
                 list(self.trainer.model.module.model.encoder.parameters()) +
                 [
-                    self.trainer.model.module.model.decoder.net.esm.encoder.layer[-1].adapter_crossattention.self.value.lora_A,
-                    self.trainer.model.module.model.decoder.net.esm.encoder.layer[-1].adapter_crossattention.self.value.lora_B,
+                    param for pname, param in self.trainer.model.module.model.decoder.net.esm.encoder.layer[-1].named_parameters() if ("adapter" in pname) and (("lora" in pname) or ("bias" in pname))
                 ]
             )
         else:
