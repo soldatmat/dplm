@@ -64,6 +64,9 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
         for pname, param in dplm_adapter.named_parameters():
             if "adapter" not in pname:
                 param.requires_grad = False
+        dplm_adapter.net.esm.encoder.emb_layer_norm_after.requires_grad_(True)
+        dplm_adapter.net.esm.contact_head.requires_grad_(True)
+        dplm_adapter.net.lm_head.requires_grad_(True)
         
         return dplm_adapter
 
@@ -96,13 +99,6 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
             if "encoder_attention_mask" in encoder_out
             else batch["prev_tokens"].ne(self.pad_id)
         )
-
-        # trivial conditioning hack (repeats the global embedding as if it was a number of local embeddings)
-        # encoder_hidden_states = encoder_hidden_states.unsqueeze(1).expand(-1, batch["prev_tokens"].size(1), -1)
-        # size (16, 640) -> (16, 954, 640) # batch_size=16, seq_len=954, embedding_dim=640
-
-        # encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
-        # size (16, 640) -> (16, 1, 640)
 
         outputs = self.net(
             input_ids=batch["prev_tokens"],
@@ -224,12 +220,20 @@ class GlobalAdapterLayer(nn.Module):
         self.adapter_output = EsmOutput(config)
 
         if cfg.lora:
-            value = self.adapter_crossattention.self.value
-            self.adapter_crossattention.self.value = LoraLinear(
-                value.weight,
-                bias=value.bias,
-            )
-            del value
+            def replace_with_lora(linear):
+                linear = LoraLinear(
+                    linear.weight,
+                    bias=linear.bias,
+                )
+                return linear
+
+            self.adapter_crossattention.self.query = replace_with_lora(self.adapter_crossattention.self.query)
+            self.adapter_crossattention.self.key = replace_with_lora(self.adapter_crossattention.self.key)
+            self.adapter_crossattention.self.value = replace_with_lora(self.adapter_crossattention.self.value)
+            self.adapter_crossattention.output.dense = replace_with_lora(self.adapter_crossattention.output.dense)
+            self.adapter_intermediate.dense = replace_with_lora(self.adapter_intermediate.dense)
+            self.adapter_output.dense = replace_with_lora(self.adapter_output.dense)
+            
 
         self.LayerNorm = nn.LayerNorm(
             config.hidden_size, eps=config.layer_norm_eps

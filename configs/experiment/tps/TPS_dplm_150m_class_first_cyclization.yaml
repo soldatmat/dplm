@@ -62,11 +62,11 @@ task:
       - 0.98
     weight_decay: 0.0001
   lr_scheduler:
-    type: noam
-    warmup_steps: 4000
-    model_size: 128
-    lr: ${train.lr}
-    warmup_init_lr: 1e-07
+    type: noam # is used
+    warmup_steps: 4000 # is used by NoamScheduler
+    model_size: 128 # is used by NoamScheduler
+    lr: ${train.lr} # is used by NoamScheduler
+    warmup_init_lr: 1e-07 # accepted but not used by NoamScheduler
   generator:
     max_iter: 10
     strategy: "discrete_diffusion"
@@ -76,8 +76,8 @@ task:
     use_draft_seq: true
 
 train:
-  seed: 42
-  lr: 0.001
+  # seed: 42 # does nothing
+  lr: 0.001 # is used
   monitor: "val/acc_median"
   mode: "max"
 

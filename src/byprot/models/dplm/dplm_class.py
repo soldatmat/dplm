@@ -115,7 +115,7 @@ class DPLMClass(nn.Module):
             encoder_out = self.encoder(batch, output_logits=False, **kwargs)
 
         encoder_out = {"feats": encoder_out}
-        encoder_out["feats"] = encoder_out["feats"].repeat(2, 1).detach()
+        encoder_out["feats"] = encoder_out["feats"].repeat(2, 1) #.detach()
 
         encoder_out["encoder_attention_mask"] = batch["input_mask"]
         encoder_out["encoder_attention_mask"] = encoder_out[

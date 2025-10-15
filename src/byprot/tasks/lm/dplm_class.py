@@ -137,8 +137,8 @@ class ConditionalDPLMTrainingTask(TaskLitModule):
                     log.info(f"   {name}, {param.size()} = {param.numel()} params")
             log.info("The following parameters of the model are optimized by the optimizer (& have requires_grad=True):")
             for param, p_name in optimized_params:
-                log.info(f"   {p_name}, {param.size()} = {param.numel()} params")
-        
+               log.info(f"   {p_name}, {param.size()} = {param.numel()} params")
+
         print_trained_params(optimizer, self.trainer.model.module.model)
 
         if (
