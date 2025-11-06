@@ -6,6 +6,8 @@
 # :gpu_mem=40gb set empirically to filter out nodes where jobs don't finish in 30min
 # RAM: 150m model uses 3gb, 650m model uses up to 18gb
 
+# usage: qsub -N <job_name> -l walltime=<walltime> -v args="--seq_lens <seq_lens> [--num_seqs <num_seqs> --model_name <model> --from_huggingface <from_huggingface> --architecture <architecture> --saveto <saveto> --temperature <temperature> --max_iter <max_iter> --seed <seed> --cond_position <cond_position> --cond_seq <cond_seq> --cache_dir <cache_dir>]" run_generate_dplm.sh
+
 # -----------------------------------------
 
 # export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
@@ -19,14 +21,6 @@ mamba activate /storage/brno2/home/soldatmat/.conda/envs/dplm
 
 cd $DATADIR
 
-python generate_dplm_fixed.py \
-  --model_name "$MODEL" \
-  --from_huggingface "$FROM_HUGGINGFACE" \
-  --architecture "$ARCHITECTURE" \
-  --saveto  "$SAVETO" \
-  --seq_lens "$SEQ_LENS" \
-  --num_seqs "$NUM_SEQS" \
-  --temperature "$TEMPERATURE" \
-  --cache_dir "$CACHE_DIR"
+python generate_dplm_fixed.py $args
 
 clean_scratch

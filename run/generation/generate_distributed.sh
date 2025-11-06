@@ -55,7 +55,7 @@ tail -n +2 "$CSV_FILE" | while IFS=, read -r length count; do
     job_name=generate_"$safe_model_name"_sl_"$length"_ns_"$count"_t_"$TEMPERATURE"
     echo $job_name
 
-    qsub -v MODEL="$MODEL",FROM_HUGGINGFACE="$FROM_HUGGINGFACE",ARCHITECTURE="$ARCHITECTURE",SAVETO="$SAVETO",SEQ_LENS="$length",NUM_SEQS="$count",TEMPERATURE="$TEMPERATURE" \
+    qsub -v args="--model $MODEL --from_huggingface $FROM_HUGGINGFACE --architecture $ARCHITECTURE --saveto $SAVETO --seq_lens $length --num_seqs $count --temperature $TEMPERATURE" \
         -N $job_name \
         -l walltime="$walltime" \
         run_generate_dplm.sh

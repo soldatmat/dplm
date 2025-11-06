@@ -10,6 +10,7 @@ python generate_dplm_fixed.py \
 import argparse
 import os
 from pprint import pprint
+import json
 
 import torch
 
@@ -76,11 +77,16 @@ def initialize_generation(
     # if cond_seq is None:
     #     batch['input_ids'], _ = _full_mask(batch['input_ids'].clone(), collater.alphabet)
     batch = utils.recursive_to(batch, device)
-    pprint(batch)
+    # pprint(batch)
     return batch["input_ids"]
 
 
 def generate(args):
+    os.makedirs(args.saveto, exist_ok=True)
+    args_file = os.path.join(args.saveto, "args.json")
+    with open(args_file, "w") as fh:
+        json.dump(vars(args), fh, indent=2, default=str)
+
     if args.architecture == "DiffusionProteinLanguageModel":
         model = DiffusionProteinLanguageModel.from_pretrained(
             args.model_name, net_override={"cache_dir": args.cache_dir}, from_huggingface=args.from_huggingface
@@ -103,23 +109,34 @@ def generate(args):
     model = model.cuda()
     device = next(model.parameters()).device
 
-    for seq_len in args.seq_lens:
-        max_iter = args.max_iter
+    if len(args.num_seqs) == 1:
+        num_seqs = args.num_seqs * len(args.seq_lens)
+    else:
+        assert len(args.num_seqs) == len(
+            args.seq_lens
+        ), "The length of num_seqs and seq_lens does not match."
+        num_seqs = args.num_seqs
+
+    for i, seq_len in enumerate(args.seq_lens):
+        # Initialize input tokens
         input_tokens = initialize_generation(
-            args.num_seqs, seq_len, tokenizer, device
+            num_seqs[i], seq_len, tokenizer, device
         )
+
+        # Generate sequences
         partial_mask = input_tokens.ne(model.mask_id)
         with torch.cuda.amp.autocast():
             outputs = model.generate(
                 input_tokens=input_tokens,
                 tokenizer=tokenizer,
-                max_iter=max_iter,
+                max_iter=args.max_iter,
                 sampling_strategy=args.sampling_strategy,
                 partial_masks=partial_mask,
                 temperature=args.temperature,
             )
         output_tokens = outputs
 
+        # Extract generated sequences
         print("final:")
         output_results = [
             "".join(seq.split(" "))
@@ -129,13 +146,14 @@ def generate(args):
         ]
         pprint(output_results)
 
-        os.makedirs(args.saveto, exist_ok=True)
+        # Save generated sequences to fasta file
+        fasta_file_name = f"iter_{args.max_iter}_L_{seq_len}.fasta"
         saveto_name = os.path.join(
-            args.saveto, f"iter_{max_iter}_L_{seq_len}.fasta"
+            args.saveto, fasta_file_name
         )
         fp_save = open(saveto_name, "w")
         for idx, seq in enumerate(output_results):
-            fp_save.write(f">SEQUENCE_{idx}_L={seq_len}\n")
+            fp_save.write(f">SEQUENCE_{idx}\n")
             fp_save.write(f"{seq}\n")
         fp_save.close()
 
@@ -149,7 +167,7 @@ def main():
     )
     parser.add_argument("--from_huggingface", type=bool, default=True)
     parser.add_argument("--architecture", type=str, default="DiffusionProteinLanguageModel")
-    parser.add_argument("--num_seqs", type=int, default=40)
+    parser.add_argument("--num_seqs", nargs="*", type=int, default=[40])
     parser.add_argument("--seq_lens", nargs="*", type=int)
     parser.add_argument("--saveto", type=str, default="gen.fasta")
     parser.add_argument("--temperature", type=float, default=1.0)
