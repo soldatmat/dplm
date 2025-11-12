@@ -53,7 +53,7 @@ def get_net(cfg):
         from byprot.models.dplm.modules.dplm_modeling_esm import EsmForDPLM
 
         config = AutoConfig.from_pretrained(f"{cfg.net.name}")
-        net = EsmForDPLM(config, dropout=cfg.net.dropout)
+        net = EsmForDPLM(config, dropout=cfg.net.dropout, conditioning_mode=getattr(cfg, "encoder_conditioning_mode", None))
     # TODO: dplm will support more architectures, such as Llama
     else:
         raise NotImplementedError

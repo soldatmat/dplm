@@ -49,24 +49,31 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
 
     @classmethod
     def from_pretrained(cls, cfg):
-        net = DiffusionProteinLanguageModel.from_pretrained(cfg.dplm_name, from_huggingface=cfg.from_huggingface).net
+        net_override = {"conditioning_mode": cfg.encoder_conditioning_mode}
+        net = DiffusionProteinLanguageModel.from_pretrained(cfg.dplm_name, from_huggingface=cfg.from_huggingface, net_override=net_override).net
 
-        # change net.last_layer to GlobalAdapterLayer
-        # by default based on the esm model
-        adapter = GlobalAdapterLayer(cfg, deepcopy(net.config))
-        net_last_layer = net.esm.encoder.layer[-1]
-        adapter.load_state_dict(net_last_layer.state_dict(), strict=False)
-        net.esm.encoder.layer[-1] = adapter
-        del net_last_layer
+        if cfg.encoder_conditioning_mode == "prepend":
+            pass
+        else:
+            # change net.last_layer to GlobalAdapterLayer
+            adapter = GlobalAdapterLayer(cfg, deepcopy(net.config))
+            net_last_layer = net.esm.encoder.layer[-1]
+            adapter.load_state_dict(net_last_layer.state_dict(), strict=False)
+            net.esm.encoder.layer[-1] = adapter
+            del net_last_layer
 
         dplm_adapter = cls(cfg, net)
 
-        for pname, param in dplm_adapter.named_parameters():
-            if "adapter" not in pname:
-                param.requires_grad = False
-        dplm_adapter.net.esm.encoder.emb_layer_norm_after.requires_grad_(True)
-        dplm_adapter.net.esm.contact_head.requires_grad_(True)
-        dplm_adapter.net.lm_head.requires_grad_(True)
+        if cfg.encoder_conditioning_mode == "prepend":
+            # TODO enable LoRA for prepend adapter
+            pass
+        else:
+            for pname, param in dplm_adapter.named_parameters():
+                if "adapter" not in pname:
+                    param.requires_grad = False
+            dplm_adapter.net.esm.encoder.emb_layer_norm_after.requires_grad_(True)
+            dplm_adapter.net.esm.contact_head.requires_grad_(True)
+            dplm_adapter.net.lm_head.requires_grad_(True)
         
         return dplm_adapter
 

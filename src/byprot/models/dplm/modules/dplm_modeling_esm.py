@@ -150,7 +150,7 @@ class ModifiedEsmEncoder(EsmEncoder):
 
 
 class ModifiedEsmModel(EsmModel):
-    def __init__(self, config, add_pooling_layer=True):
+    def __init__(self, config, add_pooling_layer=True, conditioning_mode=None):
         EsmPreTrainedModel.__init__(self, config)
         self.config = config
 
@@ -163,6 +163,8 @@ class ModifiedEsmModel(EsmModel):
             in_features=config.num_hidden_layers * config.num_attention_heads,
             bias=True,
         )
+
+        self.conditioning_mode = conditioning_mode
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -283,6 +285,24 @@ class ModifiedEsmModel(EsmModel):
             inputs_embeds=inputs_embeds,
             past_key_values_length=past_key_values_length,
         )
+
+        if self.conditioning_mode == "prepend":
+            # Prepend input_ids with an extra <cls> token as the class token
+            class_tokens = torch.full(
+                (input_ids.size(0), 1),
+                self.config.cls_token_id,
+                dtype=input_ids.dtype,
+                device=input_ids.device,
+            )
+            input_ids = torch.cat([class_tokens, input_ids], dim=1)
+            # Prepend the encoder hidden states as a class token embedding
+            embedding_output = torch.cat([encoder_hidden_states.unsqueeze(1), embedding_output], dim=1)
+            # Give class tokens same attention as the BOS tokens
+            class_token_attention = extended_attention_mask[:,:,:,0].unsqueeze(3)
+            extended_attention_mask = torch.cat([class_token_attention, extended_attention_mask], dim=3)
+            class_token_encoder_attention = encoder_extended_attention_mask[:,0].unsqueeze(1)
+            encoder_extended_attention_mask = torch.cat([class_token_encoder_attention, encoder_extended_attention_mask], dim=1)
+
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
@@ -295,7 +315,16 @@ class ModifiedEsmModel(EsmModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
+
+        if self.conditioning_mode == "prepend":
+            # Remove class token embedding from the output
+            last_hidden_output_key = list(encoder_outputs.keys())[0]
+            encoder_outputs[last_hidden_output_key] = encoder_outputs[last_hidden_output_key][:, 1:, :]
+            if len(encoder_outputs) > 1:
+                raise NotImplementedError("Multiple ModifiedEsmEncoder outputs are not implemented with \"prepend\" conditioning_mode.")
+
         sequence_output = encoder_outputs[0]
+
         pooled_output = (
             self.pooler(sequence_output) if self.pooler is not None else None
         )
@@ -315,12 +344,14 @@ class ModifiedEsmModel(EsmModel):
 
 @register_model("dplm_esm")
 class EsmForDPLM(EsmForMaskedLM):
-    def __init__(self, config, dropout=0.1):
+    def __init__(self, config, dropout=0.1, conditioning_mode=None):
         tokenizer = AutoTokenizer.from_pretrained(config._name_or_path)
         config.hidden_dropout_prob = dropout
 
+        config.cls_token_id = tokenizer._token_to_id[str(tokenizer._cls_token)]
+
         EsmPreTrainedModel.__init__(self, config)
-        self.esm = ModifiedEsmModel(config, add_pooling_layer=False)
+        self.esm = ModifiedEsmModel(config, add_pooling_layer=False, conditioning_mode=conditioning_mode)
         self.lm_head = EsmLMHead(config)
 
         self.init_weights()
