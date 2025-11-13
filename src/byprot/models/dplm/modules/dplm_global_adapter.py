@@ -21,7 +21,7 @@ from transformers.models.esm.modeling_esm import (
 
 from byprot import utils
 from byprot.models.dplm import DiffusionProteinLanguageModel
-from byprot.models.utils import NetConfig, get_net
+from byprot.models.utils import NetConfig, LoRAConfig, get_net
 
 # TODO https://github.com/bytedance/dplm/issues/47
 # from byprot.models.dplm.modules.dplm_modeling_esm import (
@@ -41,7 +41,7 @@ class DPLMWithGlobalAdapterConfig:
     dplm_name: str = field(default="")
     from_huggingface: bool = field(default=True)
     net: NetConfig = field(default=NetConfig())
-    lora: bool = field(default=True)
+    lora: LoRAConfig = field(default=LoRAConfig())
 
 
 class DPLMWithConditionalGlobalAdapter(nn.Module):
@@ -50,8 +50,11 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
     @classmethod
     def from_pretrained(cls, cfg):
         net_override = {"conditioning_mode": cfg.encoder_conditioning_mode}
-        net = DiffusionProteinLanguageModel.from_pretrained(cfg.dplm_name, from_huggingface=cfg.from_huggingface, net_override=net_override).net
+        net = DiffusionProteinLanguageModel.from_pretrained(cfg.dplm_name, net_override=net_override, from_huggingface=cfg.from_huggingface).net
 
+        del net.esm.contact_head
+
+        # Add conditioning adapter to the architecture
         if cfg.encoder_conditioning_mode == "prepend":
             pass
         else:
@@ -62,18 +65,38 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
             net.esm.encoder.layer[-1] = adapter
             del net_last_layer
 
+        # Initialize DPLMWithConditionalGlobalAdapter
         dplm_adapter = cls(cfg, net)
 
+        # Freeze parameters
         if cfg.encoder_conditioning_mode == "prepend":
-            # TODO enable LoRA for prepend adapter
             pass
         else:
             for pname, param in dplm_adapter.named_parameters():
                 if "adapter" not in pname:
                     param.requires_grad = False
             dplm_adapter.net.esm.encoder.emb_layer_norm_after.requires_grad_(True)
-            dplm_adapter.net.esm.contact_head.requires_grad_(True)
             dplm_adapter.net.lm_head.requires_grad_(True)
+
+        # Activate LoRA with the PEFT library
+        if cfg.lora.enable:
+            logger.info(f"Activating LoRA training with the PEFT library for net ({type(dplm_adapter.net)}):")
+            from peft import LoraConfig, TaskType, get_peft_model
+
+            lora_target_module = cfg.lora.lora_target_module
+            modules_to_save = cfg.lora.modules_to_save.split(",")
+
+            peft_config = LoraConfig(
+                task_type=TaskType.SEQ_2_SEQ_LM,
+                target_modules=lora_target_module,
+                # modules_to_save=modules_to_save,
+                inference_mode=False,
+                r=cfg.lora.lora_rank,
+                lora_alpha=cfg.lora.lora_alpha,
+                lora_dropout=cfg.lora.lora_dropout,
+            )
+            dplm_adapter.net = get_peft_model(dplm_adapter.net, peft_config)
+            dplm_adapter.net.print_trainable_parameters()
         
         return dplm_adapter
 
@@ -225,22 +248,6 @@ class GlobalAdapterLayer(nn.Module):
         # config.intermediate_size = config.hidden_size // 2 # Notes: bottleneck ffn
         self.adapter_intermediate = EsmIntermediate(config)
         self.adapter_output = EsmOutput(config)
-
-        if cfg.lora:
-            def replace_with_lora(linear):
-                linear = LoraLinear(
-                    linear.weight,
-                    bias=linear.bias,
-                )
-                return linear
-
-            self.adapter_crossattention.self.query = replace_with_lora(self.adapter_crossattention.self.query)
-            self.adapter_crossattention.self.key = replace_with_lora(self.adapter_crossattention.self.key)
-            self.adapter_crossattention.self.value = replace_with_lora(self.adapter_crossattention.self.value)
-            self.adapter_crossattention.output.dense = replace_with_lora(self.adapter_crossattention.output.dense)
-            self.adapter_intermediate.dense = replace_with_lora(self.adapter_intermediate.dense)
-            self.adapter_output.dense = replace_with_lora(self.adapter_output.dense)
-            
 
         self.LayerNorm = nn.LayerNorm(
             config.hidden_size, eps=config.layer_norm_eps
@@ -394,31 +401,3 @@ class GlobalAdapterEsmAttention(EsmAttention):
     def __init__(self, config, kdim=None, vdim=None):
         super().__init__(config)
         self.self = GlobalAdapterEsmSelfAttention(config, kdim=kdim, vdim=vdim)
-
-
-class LoraLinear(nn.Module):
-    def __init__(self, weight, bias=None, r=1):
-        super().__init__()
-        self.in_features = weight.size(1)
-        self.out_features = weight.size(0)
-        self.r = r
-        self.weight = nn.Parameter(weight)
-        if bias is not None:
-            self.bias = nn.Parameter(bias)
-        else:
-            self.register_parameter('bias', None)
-        
-        # LoRA parameters
-        self.lora_A = nn.Parameter(torch.empty(self.r, self.in_features, requires_grad=True, device=weight.device))
-        self.lora_B = nn.Parameter(torch.empty(self.out_features, self.r, requires_grad=True, device=weight.device))
-        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-        nn.init.zeros_(self.lora_B)
-    
-    def __repr__(self):
-        return f"LoraLinear(in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}, r={self.r})"
-
-    def forward(self, x):
-        lora_update = self.lora_B @ self.lora_A
-        updated_weights = self.weight + lora_update
-        result = nn.functional.linear(x, updated_weights, self.bias)
-        return result

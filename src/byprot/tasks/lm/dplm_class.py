@@ -102,18 +102,11 @@ class ConditionalDPLMTrainingTask(TaskLitModule):
         See examples here:
             https://pytorch-lightning.readthedocs.io/en/latest/common/lightning_module.html#configure-optimizers
         """
-        if self.hparams.model.decoder.lora:
-            optimizer = get_optimizer(
-                self.hparams.optimizer,
-                list(self.trainer.model.module.model.encoder.parameters()) +
-                [
-                    param for pname, param in self.trainer.model.module.model.decoder.net.esm.encoder.layer[-1].named_parameters() if ("adapter" in pname) and (("lora" in pname) or ("bias" in pname))
-                ]
-            )
-        else:
-            optimizer = get_optimizer(
-                self.hparams.optimizer, self.trainer.model.parameters()
-            )
+        optimizer = get_optimizer(
+            self.hparams.optimizer, self.trainer.model.parameters()
+        )
+        print("All parameters in optimizer:")
+        print(optimizer)
 
         def count_optimized_params(optimizer, model):
                 optimized = set()
@@ -129,7 +122,8 @@ class ConditionalDPLMTrainingTask(TaskLitModule):
         def print_trained_params(optimizer, model):
             n_optimized_params, optimized_params = count_optimized_params(optimizer, model)
 
-            log.info(f"Trainable params (requires_grad): {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
+            log.info(f"Untrainable params (requires_grad is False): {sum(p.numel() for p in model.parameters() if not p.requires_grad):,}")
+            log.info(f"Trainable params (requires_grad is True): {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
             log.info(f"Optimized params (in optimizer & requires_grad): {n_optimized_params:,}")
             log.info("For the following parameters of the model, requires_grad is set to True:")
             for name, param in self.model.named_parameters():
@@ -137,7 +131,8 @@ class ConditionalDPLMTrainingTask(TaskLitModule):
                     log.info(f"   {name}, {param.size()} = {param.numel()} params")
             log.info("The following parameters of the model are optimized by the optimizer (& have requires_grad=True):")
             for param, p_name in optimized_params:
-               log.info(f"   {p_name}, {param.size()} = {param.numel()} params")
+                if param.requires_grad:
+                    log.info(f"   {p_name}, {param.size()} = {param.numel()} params")
 
         print_trained_params(optimizer, self.trainer.model.module.model)
 

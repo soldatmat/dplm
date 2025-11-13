@@ -31,7 +31,13 @@ model:
     # dplm_name: /storage/brno2/home/soldatmat/documents/terpene_synthases/dplm/logs/TPS_dplm_150m_stage3_run_8/checkpoints/best.ckpt
     encoder_d_model: ${model.encoder.embedding_dim}
     encoder_conditioning_mode: "prepend"
-    lora: false # TODO enable LoRA for prepend conditioning, here and/or in the code
+    lora:
+      enable: true
+      lora_rank: 1 # original DPLM used 16
+      lora_alpha: 2 # original DPLM used 32
+      lora_dropout: 0.1
+      lora_target_module: esm.(encoder.layer.[0-9]*.(attention.(self.query|self.key|self.value|output.dense).*|(intermediate|output).dense.*))|lm_head.dense
+      modules_to_save: ""
   encoder:
     _target_: class_encoder
     output_logits: ${task.learning.output_encoder_logits}

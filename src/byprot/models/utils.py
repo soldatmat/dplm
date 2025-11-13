@@ -34,6 +34,7 @@ class NetConfig:
 class LoRAConfig:
     enable: bool = field(default=False)
     lora_rank: int = field(default=16)
+    lora_alpha: int = field(default=32)
     lora_dropout: float = field(default=0.1)
     lora_target_module: str = field(default="")
     modules_to_save: str = field(default="")
@@ -98,7 +99,7 @@ def get_net(cfg):
             modules_to_save=modules_to_save,
             inference_mode=False,
             r=cfg.lora.lora_rank,
-            lora_alpha=32,
+            lora_alpha=cfg.lora.lora_alpha,
             lora_dropout=cfg.lora.lora_dropout,
         )
         net = get_peft_model(net, peft_config)
