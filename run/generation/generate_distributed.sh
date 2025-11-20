@@ -13,8 +13,10 @@ safe_model_name=$(echo "$MODEL_NAME" | tr '/' '-')
 SAVETO="/storage/brno2/home/soldatmat/documents/terpene_synthases/output/dplm/${safe_model_name}/sl1000_t${TEMPERATURE}"
 
 if [[ "$FROM_HUGGINGFACE" == "True" ]]; then
+    FROM_HUGGINGFACE_ARG="--from_huggingface"
     MODEL="$MODEL_NAME"
 else
+    FROM_HUGGINGFACE_ARG="--no-from_huggingface"
     MODEL="/storage/brno2/home/soldatmat/documents/terpene_synthases/dplm/logs/${MODEL_NAME}/checkpoints/${CHECKPOINT}"
 fi
 
@@ -55,7 +57,8 @@ tail -n +2 "$CSV_FILE" | while IFS=, read -r length count; do
     job_name=generate_"$safe_model_name"_sl_"$length"_ns_"$count"_t_"$TEMPERATURE"
     echo $job_name
 
-    qsub -v args="--model $MODEL --from_huggingface $FROM_HUGGINGFACE --architecture $ARCHITECTURE --saveto $SAVETO --seq_lens $length --num_seqs $count --temperature $TEMPERATURE" \
+    args="--model $MODEL $FROM_HUGGINGFACE_ARG --architecture $ARCHITECTURE --saveto $SAVETO --seq_lens $length --num_seqs $count --temperature $TEMPERATURE"
+    qsub -v args="$args" \
         -N $job_name \
         -l walltime="$walltime" \
         run_generate_dplm.sh

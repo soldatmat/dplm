@@ -6,7 +6,7 @@
 # :gpu_mem=40gb set empirically to filter out nodes where jobs don't finish in 30min
 # RAM: 150m model uses 3gb, 650m model uses up to 18gb
 
-# usage: qsub -N <job_name> -l walltime=<walltime> -v args="--seq_lens <seq_lens> [--num_seqs <num_seqs> --model_name <model> --from_huggingface <from_huggingface> --architecture <architecture> --saveto <saveto> --temperature <temperature> --max_iter <max_iter> --seed <seed> --cond_position <cond_position> --cond_seq <cond_seq> --cache_dir <cache_dir>]" run_generate_dplm.sh
+# usage: qsub -N <job_name> -l walltime=<walltime> -v args="--seq_lens <seq_lens> [--num_seqs <num_seqs> --model_name <model> --architecture <architecture> --saveto <saveto> --temperature <temperature> --max_iter <max_iter> --seed <seed> --cond_position <cond_position> --cond_seq <cond_seq> --cache_dir <cache_dir>] [--from_huggingface | --no-from_huggingface] [--batch_lens_together | --no-batch_lens_together]" run_generate_dplm.sh
 
 # -----------------------------------------
 

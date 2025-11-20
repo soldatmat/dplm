@@ -201,7 +201,7 @@ def main():
     parser.add_argument(
         "--model_name", type=str, default="airkingbd/dplm_150m"
     )
-    parser.add_argument("--from_huggingface", type=bool, default=True)
+    parser.add_argument("--from_huggingface", default=True, action=argparse.BooleanOptionalAction)
     parser.add_argument("--architecture", type=str, default="DiffusionProteinLanguageModel")
     parser.add_argument("--num_seqs", nargs="*", type=int, default=[40])
     parser.add_argument("--seq_lens", nargs="*", type=int)
@@ -211,7 +211,7 @@ def main():
         "--sampling_strategy", type=str, default="gumbel_argmax"
     )
     parser.add_argument("--max_iter", type=int, default=500)
-    parser.add_argument("--batch_lens_together", type=bool, default=False)
+    parser.add_argument("--batch_lens_together", default=False, action=argparse.BooleanOptionalAction)
     # inpainting
     # Note: the format of --cond_position and --cond_seq should split by ','
     # the number and the length of segments should match.
