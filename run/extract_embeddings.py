@@ -25,6 +25,7 @@ import json
 import esm
 from byprot import utils
 from byprot.models.dplm.dplm import DiffusionProteinLanguageModel
+from byprot.models.dplm.dplm_class import DPLMClass
 
 
 def parse_args():
@@ -119,60 +120,60 @@ def main(args):
     
     # Load model
     if args.architecture == "DiffusionProteinLanguageModel":
-        model = DiffusionProteinLanguageModel.from_pretrained(
-            args.model_name, net_override={"cache_dir": args.cache_dir}, from_huggingface=args.from_huggingface
-        )
+        model = DiffusionProteinLanguageModel.from_pretrained(args.model_name, net_override={"cache_dir": args.cache_dir}, from_huggingface=args.from_huggingface)
+        tokenizer = model.tokenizer
     elif args.architecture == "DPLMClass":
         if args.from_huggingface == True:
             raise ValueError(
                 "DPLMClass does not support from_huggingface=True."
             )
-        model = DPLMClass.from_pretrained(
-            args.model_name,
-        )
+        model = DPLMClass.from_pretrained(args.model_name)
+        tokenizer = model.decoder.tokenizer
     else:
         raise ValueError(
             f"Unsupported architecture: {args.architecture}."
             "Please choose either 'DiffusionProteinLanguageModel' or 'DPLMClass'."
         )
-    tokenizer = model.tokenizer
-    tokenizer.truncation = True
     model = model.eval()
     model = model.cuda()
     device = next(model.parameters()).device
 
-    # Load FASTA as a dataset
+    # Load input sequences
     if args.input_file.suffix.lower() == ".fasta" or args.input_file.suffix.lower() == ".fa":
         dataset = esm.FastaBatchedDataset.from_file(args.input_file)
-        original_ids = [entry[0] for entry in dataset]
-        batches = dataset.get_batch_indices(args.tokens_per_batch, extra_toks_per_seq=2)
-
-        long_count = sum(1 for _, seq in dataset if len(seq) > args.truncation_seq_length)
-        if long_count > 0:
-            warnings.warn(
-                f"{long_count} sequences are longer than truncation_seq_length ({args.truncation_seq_length}) and will be truncated.",
-                UserWarning,
-            )
-
-        def collate_fn(samples):
-            batch = tokenizer(
-                samples,
-                return_tensors="pt",
-                padding="longest", # options: "longest", "max_length"
-                truncation="longest_first", # "longest_first"
-                max_length=args.truncation_seq_length + 2,
-            )
-            batch["labels"] = [s[0] for s in samples]
-            return batch
-
-        data_loader = torch.utils.data.DataLoader(
-            dataset, collate_fn=collate_fn, batch_sampler=batches
-        )
-        print(f"Read {args.input_file} with {len(dataset)} sequences")
     elif args.input_file.suffix.lower() == ".csv":
-        raise NotImplementedError("CSV input is not implemented yet.")
+        df = pd.read_csv(args.input_file)
+        ids = df[args.id_column].tolist()
+        sequences = df[args.sequence_column].tolist()
+        dataset = esm.FastaBatchedDataset(ids, sequences)
     else:
         raise ValueError("Input file must be a FASTA (.fasta, .fa) or CSV (.csv) file.")
+
+    original_ids = [entry[0] for entry in dataset]
+    batches = dataset.get_batch_indices(args.tokens_per_batch, extra_toks_per_seq=2)
+
+    long_count = sum(1 for _, seq in dataset if len(seq) > args.truncation_seq_length)
+    if long_count > 0:
+        warnings.warn(
+            f"{long_count} sequences are longer than truncation_seq_length ({args.truncation_seq_length}) and will be truncated.",
+            UserWarning,
+        )
+
+    def collate_fn(samples):
+        batch = tokenizer(
+            samples,
+            return_tensors="pt",
+            padding="longest", # options: "longest", "max_length"
+            truncation="longest_first", # "longest_first"
+            max_length=args.truncation_seq_length + 2,
+        )
+        batch["labels"] = [s[0] for s in samples]
+        return batch
+
+    data_loader = torch.utils.data.DataLoader(
+        dataset, collate_fn=collate_fn, batch_sampler=batches
+    )
+    print(f"Read {args.input_file} with {len(dataset)} sequences")
 
     # Extract emebeddings
     embeddings = None
@@ -194,15 +195,16 @@ def main(args):
 
             out = model(tokens, attention_mask=attention_mask, return_last_hidden_state=True)
             representations = out[1]
-
-            # Exclude BOS and EOS from attention for mean pooling
-            for i in range(attention_mask.size(0)):
-                idxs = (attention_mask[i] == 1).nonzero(as_tuple=True)[0]
-                attention_mask[i, idxs[0]] = 0
-                attention_mask[i, idxs[-1]] = 0
+                
+            attention_mask = attention_mask.bool()
 
             for i, label in enumerate(labels):
                 if args.embedding_type == "mean":
+                    # Exclude BOS and EOS from attention for mean pooling
+                    idxs = (attention_mask[i] == 1).nonzero(as_tuple=True)[0]
+                    attention_mask[i, idxs[0]] = 0
+                    attention_mask[i, idxs[-1]] = 0
+
                     embedding = representations[i, attention_mask[i, :], :].mean(0)
                 elif args.embedding_type == "bos":
                     embedding = representations[i, 0, :]
