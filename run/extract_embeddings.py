@@ -32,20 +32,13 @@ def parse_args():
         description="Extract per-token representations and model outputs for sequences in a FASTA file"
     )
 
-    # Input & Output
+    # Input
     # TODO implement reading from CSV
     parser.add_argument(
         "--input_file",
         type=pathlib.Path,
         help="FASTA or CSV file on which to extract representations",
     )
-    parser.add_argument(
-       "--output_dir",
-       type=pathlib.Path,
-       help="output directory for extracted representations",
-    )
-
-    # CSV options
     parser.add_argument(
         "--id_column",
         type=str,
@@ -66,7 +59,7 @@ def parse_args():
         help="PyTorch model file OR name of pretrained model to download (see README for models)",
         default="airkingbd/dplm_150m"
     )
-    parser.add_argument("--from_huggingface", type=bool, default=True)
+    parser.add_argument("--from_huggingface", default=True, action=argparse.BooleanOptionalAction)
     parser.add_argument("--architecture", type=str, default="DiffusionProteinLanguageModel")
     parser.add_argument("--cache_dir", type=str, default=None)
 
@@ -91,6 +84,12 @@ def parse_args():
 
     # Save options
     parser.add_argument(
+        "--output_dir",
+        type=pathlib.Path,
+        help="Directory to save the extracted embeddings. default: None (same directory as input file).",
+        default=None,
+    )
+    parser.add_argument(
         "--save_as",
         choices=["torch", "numpy", "csv"],
         nargs="+",
@@ -105,8 +104,16 @@ def parse_args():
 def main(args):
     torch.set_float32_matmul_precision("high")
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    args_file = os.path.join(args.output_dir, "args.json")
+    # Prepare save path
+    partial_fasta_path = os.path.splitext(args.input_file)[0]
+    partial_save_path = partial_fasta_path + "_embeddings_" + args.embedding_type
+    if args.output_dir is not None:
+        partial_fasta_path = os.path.join(
+            args.output_dir, os.path.basename(partial_fasta_path)
+        )
+
+    # Save args
+    args_file = partial_save_path + "_args.json"
     with open(args_file, "w") as fh:
         json.dump(vars(args), fh, indent=2, default=str)
     
@@ -218,19 +225,15 @@ def main(args):
     embeddings = reordered
     embedding_labels = original_ids
         
-    # Save embeddings
-    partial_fasta_path = os.path.splitext(args.input_file)[0]
-    partial_save_path = partial_fasta_path + "_embeddings_" + args.embedding_type
-
-    # Torch
+    # Save with Torch
     if "torch" in args.save_as:
         torch.save(embeddings, partial_save_path + ".pt")
 
-    # Numpy
+    # Save with Numpy
     if "numpy" in args.save_as:
         np.save(partial_save_path + ".npy", embeddings.numpy())
 
-    # CSV
+    # Save as CSV
     df = pd.DataFrame({"id": embedding_labels})
     if "csv" in args.save_as:
         embedding_df = pd.DataFrame(embeddings.numpy())
