@@ -208,6 +208,7 @@ class MartsDBClassDataset(Dataset):
         self.class2id = {v: i for i, v in enumerate(sorted(self.data[self.class_column].unique()))}
         self.id2class = {i: v for v, i in self.class2id.items()}
         self.data[self.class_column] = self.data[self.class_column].map(self.class2id)
+        log.info(f"Class to ID mapping: {self.class2id}")
 
         self.sequence_lens = self.data[sequence_column].str.len().tolist()
 

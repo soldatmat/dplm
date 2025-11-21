@@ -304,7 +304,7 @@ class ConditionalDPLMTrainingTask(TaskLitModule):
         - lengths: int [bsz, len], protein sequence lengths
         - tokens: LongTensor [bsz, len], sequence of amino acids
         """
-        model_output = self.model(
+        model_output = self.model.compute_loss(
             batch,
             output_encoder_logits=self.hparams.learning.output_encoder_logits,
             weighting=self.hparams.learning.weight,

@@ -94,8 +94,32 @@ class DPLMClass(nn.Module):
             print(f"Missing Keys: {missing}")
             print(f"Unexpected Keys: {unexpected}")
         return model
+    
+    def forward(self, input_ids, class_ids, return_last_hidden_state=False, output_encoder_logits=False, **kwargs):
+        encoder_logits = None
+        if output_encoder_logits:
+            encoder_logits, encoder_out = self.encoder(
+                class_ids, output_logits=True, **kwargs
+            )
+        else:
+            encoder_out = self.encoder(class_ids, output_logits=False, **kwargs)
+        encoder_out = {
+            "feats": encoder_out,
+        }
 
-    def forward(
+        outputs = self.decoder(
+            input_ids=input_ids,
+            encoder_out=encoder_out,
+        )
+
+        logits = outputs["logits"]
+        if return_last_hidden_state:
+            last_hidden_state = outputs["last_hidden_state"]
+            return logits, last_hidden_state
+        else:
+            return logits
+
+    def compute_loss(
         self,
         batch,
         weighting="linear",
@@ -109,10 +133,10 @@ class DPLMClass(nn.Module):
         encoder_logits = None
         if output_encoder_logits:
             encoder_logits, encoder_out = self.encoder(
-                batch, output_logits=True, **kwargs
+                batch["class_ids"], output_logits=True, **kwargs
             )
         else:
-            encoder_out = self.encoder(batch, output_logits=False, **kwargs)
+            encoder_out = self.encoder(batch["class_ids"], output_logits=False, **kwargs)
 
         encoder_out = {"feats": encoder_out}
         encoder_out["feats"] = encoder_out["feats"].repeat(2, 1) #.detach()
@@ -144,10 +168,10 @@ class DPLMClass(nn.Module):
         if use_draft_seq:
 
             encoder_out = self.encoder(
-                batch, return_feats=True, output_logits=False
+                batch["class_ids"], return_feats=True, output_logits=False
             )
             # encoder_logits, encoder_out = self.encoder(
-            #     batch, return_feats=True, output_logits=True
+            #     batch["class_ids"], return_feats=True, output_logits=True
             # )
 
             encoder_out = {"feats": encoder_out}
@@ -163,7 +187,7 @@ class DPLMClass(nn.Module):
             encoder_out["init_pred"] = init_pred
         else:
             encoder_out = self.encoder(
-                batch, return_feats=True, output_logits=False
+                batch["class_ids"], return_feats=True, output_logits=False
             )
             # encoder_out["coord_mask"] = batch["coord_mask"]
         encoder_out["encoder_attention_mask"] = (
@@ -202,9 +226,7 @@ class DPLMClass(nn.Module):
         )
 
         esm_out = self.decoder(
-            batch={
-                "prev_tokens": output_tokens,
-            },
+            input_ids=output_tokens,
             encoder_out=encoder_out,
             need_head_weights=need_attn_weights,
         )

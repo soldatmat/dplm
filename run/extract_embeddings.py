@@ -28,13 +28,19 @@ from byprot.models.dplm.dplm import DiffusionProteinLanguageModel
 from byprot.models.dplm.dplm_class import DPLMClass
 
 
+FASTA_BATCHED_DATASET_LABEL_IDX = 0
+FASTA_BATCHED_DATASET_SEQUENCE_IDX = 1
+FASTA_BATCHED_DATASET_CLASS_ID_IDX = 2
+
+HIDDEN_STATES_IDX = 1 # index of last hidden states in model output tuple
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Extract per-token representations and model outputs for sequences in a FASTA file"
     )
 
     # Input
-    # TODO implement reading from CSV
     parser.add_argument(
         "--input_file",
         type=pathlib.Path,
@@ -51,6 +57,12 @@ def parse_args():
         type=str,
         help="column name for amino acid sequences if input is a CSV file",
         default="sequence",
+    )
+    parser.add_argument(
+        "--class_id_column",
+        type=str,
+        help="Column name for class IDs necessary for DPLMClass model. The class IDs should be integers from 0 to n_classes-1.",
+        default="class_ID",
     )
 
     # DPLM model
@@ -102,6 +114,14 @@ def parse_args():
     return args
 
 
+class FastaBatchedDatasetWithClass(esm.FastaBatchedDataset):
+    def __init__(self, sequence_labels, sequence_strs, class_ids):
+        super().__init__(sequence_labels, sequence_strs)
+        self.class_ids = list(class_ids)
+
+    def __getitem__(self, idx):
+        return self.sequence_labels[idx], self.sequence_strs[idx], self.class_ids[idx]
+
 def main(args):
     torch.set_float32_matmul_precision("high")
 
@@ -135,39 +155,62 @@ def main(args):
             "Please choose either 'DiffusionProteinLanguageModel' or 'DPLMClass'."
         )
     model = model.eval()
-    model = model.cuda()
+    if torch.cuda.is_available() and not args.nogpu:
+        model = model.cuda()
     device = next(model.parameters()).device
 
     # Load input sequences
     if args.input_file.suffix.lower() == ".fasta" or args.input_file.suffix.lower() == ".fa":
+        if args.architecture == "DPLMClass":
+            raise ValueError(
+                "DPLMClass requires per-sequence class IDs; FASTA files do not include class labels. "
+                f"Please provide a CSV input with a '{args.class_id_column}' column containing integer class IDs."
+            )
         dataset = esm.FastaBatchedDataset.from_file(args.input_file)
     elif args.input_file.suffix.lower() == ".csv":
         df = pd.read_csv(args.input_file)
         ids = df[args.id_column].tolist()
         sequences = df[args.sequence_column].tolist()
-        dataset = esm.FastaBatchedDataset(ids, sequences)
+        if args.architecture == "DPLMClass":
+            class_ids = df[args.class_id_column].tolist()
+            dataset = FastaBatchedDatasetWithClass(ids, sequences, class_ids)
+        else:
+            dataset = esm.FastaBatchedDataset(ids, sequences)
     else:
         raise ValueError("Input file must be a FASTA (.fasta, .fa) or CSV (.csv) file.")
 
-    original_ids = [entry[0] for entry in dataset]
+    original_ids = [entry[FASTA_BATCHED_DATASET_LABEL_IDX] for entry in dataset]
     batches = dataset.get_batch_indices(args.tokens_per_batch, extra_toks_per_seq=2)
 
-    long_count = sum(1 for _, seq in dataset if len(seq) > args.truncation_seq_length)
-    if long_count > 0:
+    truncated_count = sum(1 for entry in dataset if len(entry[FASTA_BATCHED_DATASET_SEQUENCE_IDX]) > args.truncation_seq_length)
+    if truncated_count > 0:
         warnings.warn(
-            f"{long_count} sequences are longer than truncation_seq_length ({args.truncation_seq_length}) and will be truncated.",
+            f"{truncated_count} sequences are longer than truncation_seq_length ({args.truncation_seq_length}) and will be truncated.",
             UserWarning,
         )
 
     def collate_fn(samples):
+        if args.architecture == "DPLMClass":
+            sample_for_tokenizer = [(s[FASTA_BATCHED_DATASET_LABEL_IDX], s[FASTA_BATCHED_DATASET_SEQUENCE_IDX]) for s in samples]
+        else:
+            sample_for_tokenizer = samples
+
         batch = tokenizer(
-            samples,
+            sample_for_tokenizer,
             return_tensors="pt",
             padding="longest", # options: "longest", "max_length"
             truncation="longest_first", # "longest_first"
             max_length=args.truncation_seq_length + 2,
         )
-        batch["labels"] = [s[0] for s in samples]
+
+        batch["input_ids"] = batch["input_ids"].to(device=device, non_blocking=True)
+        batch["attention_mask"] = batch["attention_mask"].to(device=device, non_blocking=True)
+        batch["labels"] = [s[FASTA_BATCHED_DATASET_LABEL_IDX] for s in samples]
+        if args.architecture == "DPLMClass":
+            batch["class_ids"] = torch.tensor(
+                [int(s[FASTA_BATCHED_DATASET_CLASS_ID_IDX]) for s in samples],
+            ).to(device=device, non_blocking=True)
+
         return batch
 
     data_loader = torch.utils.data.DataLoader(
@@ -182,29 +225,23 @@ def main(args):
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(iter(data_loader)):
-            tokens = batch["input_ids"]
-            attention_mask = batch["attention_mask"]
-            labels = batch["labels"]
             print(
-                f"Processing {batch_idx + 1} of {len(batches)} batches ({tokens.size(0)} sequences)"
+                f"Processing {batch_idx + 1} of {len(batches)} batches ({batch['input_ids'].size(0)} sequences)"
             )
 
-            if torch.cuda.is_available() and not args.nogpu:
-                tokens = tokens.to(device="cuda", non_blocking=True)
-                attention_mask = attention_mask.to(device="cuda", non_blocking=True)
+            if args.architecture == "DPLMClass":
+                out = model(batch["input_ids"], batch["class_ids"], return_last_hidden_state=True)
+            else:
+                out = model(batch["input_ids"], return_last_hidden_state=True)
+            representations = out[HIDDEN_STATES_IDX]
+            attention_mask = batch["attention_mask"].bool()
 
-            out = model(tokens, attention_mask=attention_mask, return_last_hidden_state=True)
-            representations = out[1]
-                
-            attention_mask = attention_mask.bool()
-
-            for i, label in enumerate(labels):
+            for i, label in enumerate(batch["labels"]):
                 if args.embedding_type == "mean":
                     # Exclude BOS and EOS from attention for mean pooling
                     idxs = (attention_mask[i] == 1).nonzero(as_tuple=True)[0]
                     attention_mask[i, idxs[0]] = 0
                     attention_mask[i, idxs[-1]] = 0
-
                     embedding = representations[i, attention_mask[i, :], :].mean(0)
                 elif args.embedding_type == "bos":
                     embedding = representations[i, 0, :]

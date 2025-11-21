@@ -115,7 +115,7 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
 
     def forward(
         self,
-        batch,
+        input_ids,
         encoder_out=None,
         tokens=None,
         loss_mask=None,
@@ -127,11 +127,11 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
         encoder_attention_mask = (
             encoder_out["encoder_attention_mask"]
             if "encoder_attention_mask" in encoder_out
-            else batch["prev_tokens"].ne(self.pad_id)
+            else input_ids.ne(self.pad_id)
         )
 
         outputs = self.net(
-            input_ids=batch["prev_tokens"],
+            input_ids=input_ids,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_attention_mask,
         )
@@ -170,9 +170,8 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
         )
         target = target.repeat(2, 1)
 
-        batch["prev_tokens"] = x_t
         logits = self.forward(
-            batch,
+            x_t,
             encoder_out=encoder_out,
             loss_mask=loss_mask,
             forward_diffusion=True,

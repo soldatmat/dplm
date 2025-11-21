@@ -31,11 +31,11 @@ class ClassEncoder(torch.nn.Module):
     
     # TODO add from_pretrained option
 
-    def forward(self, batch, output_logits=False, **kwargs):
+    def forward(self, class_ids, output_logits=False, **kwargs):
         if output_logits:
             raise NotImplementedError("output_encoder_logits=True is not implemented.")
 
-        encoder_out = self.encoder(batch["class_ids"])
+        encoder_out = self.encoder(class_ids)
 
         return encoder_out
         # if output_logits:
