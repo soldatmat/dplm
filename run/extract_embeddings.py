@@ -129,8 +129,10 @@ def main(args):
     partial_fasta_path = os.path.splitext(args.input_file)[0]
     partial_save_path = partial_fasta_path + "_embeddings_" + args.embedding_type
     if args.output_dir is not None:
-        partial_fasta_path = os.path.join(
-            args.output_dir, os.path.basename(partial_fasta_path)
+        output_dir = pathlib.Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        partial_save_path = os.path.join(
+            output_dir, os.path.basename(partial_save_path)
         )
 
     # Save args
