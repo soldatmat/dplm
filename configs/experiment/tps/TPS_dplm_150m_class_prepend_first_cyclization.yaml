@@ -19,7 +19,7 @@ datamodule:
   max_tokens: 8192 # original 6000
   # max_len: 1022
   class_column: First_cyclization_product
-  n_classes: 23
+  n_classes: 25
 
 model:
   _target_: dplm_class

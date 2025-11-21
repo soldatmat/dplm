@@ -27,7 +27,7 @@ class MartsDBClassDataModule(LightningDataModule):
         self,
         data_path: str, # = "data/tape",
         class_column: str = None,
-        n_classes: int = 23,
+        n_classes: int = 25,
         max_tokens: int = 6000,
         max_len: int = 2048,
         collater: str = "esm",
