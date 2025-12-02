@@ -5,11 +5,13 @@
 import importlib
 import operator
 import os
+from types import SimpleNamespace
 
 # from pytorch_lightning.utilities.imports import _RICH_AVAILABLE
 from importlib.util import find_spec
 from typing import Callable, Dict
 
+import pandas as pd
 import pkg_resources
 import pytorch_lightning as pl
 import torch
@@ -24,6 +26,8 @@ from pytorch_lightning.utilities.rank_zero import (
 )
 from rich import reconfigure
 from torch import Tensor
+
+from byprot.utils.generation import generate
 
 
 def _package_available(package_name: str) -> bool:
@@ -347,3 +351,53 @@ class TrackNorms(pl.Callback):
                 param_norm = torch.mean(p.grad.data**2)
                 norms[f"grad_norm.{name}"] = param_norm
             pl_module._grad_norms = norms
+
+
+class ValidateWithEnzymeExplorer(pl.Callback):
+    def __init__(
+        self,
+        template_sequences_file: str,
+        sequence_column_name: str = "sequence",
+        class_id_column_name: str = None,
+        max_iter: int = 500,
+        sampling_strategy: str = "gumbel_argmax",
+        temperature: float = 1.0,
+        saveto: str = "./dplm_generated",
+        generation_batch_size: int = 32,
+    ):
+        data = pd.read_csv(template_sequences_file)
+        self.seq_lens = data[sequence_column_name].apply(len).tolist()
+        self.num_seqs = [1 for seq in self.seq_lens]
+        if class_id_column_name is not None:
+            self.class_ids = data[class_id_column_name].tolist()
+        else:
+            self.class_ids = None
+
+        self.max_iter = max_iter
+        self.sampling_strategy = sampling_strategy
+        self.temperature = temperature
+        self.saveto = saveto
+        self.generation_batch_size = generation_batch_size
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        model = pl_module.model
+        tokenizer = pl_module.model.decoder.net.tokenizer
+
+        args = SimpleNamespace()
+        args.seed = None
+        args.architecture = type(model).__name__
+        args.num_seqs = self.num_seqs
+        args.seq_lens = self.seq_lens
+        args.class_ids = self.class_ids
+        args.saveto = os.path.join(self.saveto, "epoch_" + str(trainer.current_epoch))
+        args.temperature = self.temperature
+        args.sampling_strategy = self.sampling_strategy
+        args.max_iter = self.max_iter
+        args.batch_lens_together = True
+        args.batch_size = self.generation_batch_size
+        args.cond_seq = None # TODO add to ValidateWithEnzymeExplorer
+        args.cache_dir = None
+
+        generate(args, model, tokenizer)
+
+        # TODO validate generated sequences with EnzymeExplorer

@@ -165,31 +165,13 @@ class DPLMClass(nn.Module):
     def forward_encoder(self, batch, use_draft_seq=False):
         encoder_logits = None
         encoder_out = None
+
+        encoder_out = self.encoder(
+            batch["class_ids"], return_feats=True, output_logits=False
+        )
+        encoder_out = {"feats": encoder_out}
         if use_draft_seq:
-
-            encoder_out = self.encoder(
-                batch["class_ids"], return_feats=True, output_logits=False
-            )
-            # encoder_logits, encoder_out = self.encoder(
-            #     batch["class_ids"], return_feats=True, output_logits=True
-            # )
-
-            encoder_out = {"feats": encoder_out}
-
-            # init_pred = encoder_logits.argmax(-1)
-            # if self.init_pred_where:
-            #     init_pred = torch.where(
-            #         batch["coord_mask"], init_pred, batch["prev_tokens"]
-            #     )
-            init_pred = batch["prev_tokens"]
-
-            # encoder_out["logits"] = encoder_logits
-            encoder_out["init_pred"] = init_pred
-        else:
-            encoder_out = self.encoder(
-                batch["class_ids"], return_feats=True, output_logits=False
-            )
-            # encoder_out["coord_mask"] = batch["coord_mask"]
+            encoder_out["init_pred"] = batch["prev_tokens"]
         encoder_out["encoder_attention_mask"] = (
             batch["motif_mask"]
             if "motif_mask" in batch

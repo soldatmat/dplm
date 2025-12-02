@@ -27,6 +27,14 @@ checkpoint_every_n_steps:
   _target_: byprot.utils.callbacks.CheckpointEveryNSteps
   save_step_frequency: 1000
 
+validate_with_enzyme_explorer:
+  _target_: byprot.utils.callbacks.ValidateWithEnzymeExplorer
+  template_sequences_file: ${datamodule.data_path}
+  sequence_column_name: "Aminoacid_sequence"
+  class_id_column_name: "First_cyclization_product_id"
+  saveto: ${paths.log_dir}/enzyme_explorer_validation
+  max_iter: 10 # 500
+
 # val_every_Nsteps:
 #   _target_: src.utils.callbacks.ValEveryNSteps
 #   every_n_step: 10
