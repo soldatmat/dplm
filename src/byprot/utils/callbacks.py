@@ -5,7 +5,11 @@
 import importlib
 import operator
 import os
+from pathlib import Path
 from types import SimpleNamespace
+from time import time
+from uuid import uuid4
+from shutil import rmtree
 
 # from pytorch_lightning.utilities.imports import _RICH_AVAILABLE
 from importlib.util import find_spec
@@ -26,8 +30,18 @@ from pytorch_lightning.utilities.rank_zero import (
 )
 from rich import reconfigure
 from torch import Tensor
+import gdown # type: ignore
+import logging
 
+from byprot import utils
 from byprot.utils.generation import generate
+
+from enzymeexplorer.src.screening.tps_predict_fasta import main as enzymeexplorer_tps_predict_fasta
+from enzymeexplorer.src.screening.gather_detections_to_csv import main as enzymeexplorer_gather_detections_to_csv
+
+PLM_CHECKPOINT_DIR = "data/plm_checkpoints" # TODO set a permanent folder for EnzymeExplorer PLM checkpoints
+
+logger = utils.get_logger(__name__)
 
 
 def _package_available(package_name: str) -> bool:
@@ -364,6 +378,10 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         temperature: float = 1.0,
         saveto: str = "./dplm_generated",
         generation_batch_size: int = 32,
+        enzymeexplorer_detection_threshold: float = 0.0,
+        enzymeexplorer_detect_precursor_synthases: bool = True,
+        enzymeexplorer_model: str = "esm-1v-finetuned-subseq",
+        every_n_epochs: int = 1,
     ):
         data = pd.read_csv(template_sequences_file)
         self.seq_lens = data[sequence_column_name].apply(len).tolist()
@@ -379,10 +397,76 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         self.saveto = saveto
         self.generation_batch_size = generation_batch_size
 
+        self.enzymeexplorer_detection_threshold = enzymeexplorer_detection_threshold
+        self.enzymeexplorer_detect_precursor_synthases = enzymeexplorer_detect_precursor_synthases
+        self.enzymeexplorer_model = enzymeexplorer_model
+        self.enzymeexplorer_checkpoint_path = self._prepare_plm_checkpoint()
+
+        self.every_n_epochs = every_n_epochs
+
+    def _prepare_plm_checkpoint(self):
+        plm_chkpt_path = Path(PLM_CHECKPOINT_DIR)
+        if not plm_chkpt_path.exists():
+            plm_chkpt_path.mkdir(parents=True)
+        assert self.enzymeexplorer_model in {
+            "esm-1v",
+            "esm-1v-finetuned-subseq",
+            "ankh_tps",
+            "ankh_base",
+        }, f"Model {self.enzymeexplorer_model} is not supported. Choose between esm-1v, esm-1v-finetuned-subseq, ankh_base, and ankh_tps"
+        plm_path = plm_chkpt_path / ("checkpoint-tps-esm1v-t33-subseq.ckpt" if self.enzymeexplorer_model == "esm-1v-finetuned-subseq" else "tps_ankh_lr=5e-05_bs=32.pth")
+        if not plm_path.exists():
+            logger.info("Downloading TPS language model checkpoint..")
+            url = "https://drive.google.com/uc?id=1jU76oUl0-CmiB9m3XhaKmI2HorFhyxC7"
+            gdown.download(url, str(plm_path), quiet=False)
+        clf_chkpt_path = Path("data/classifier_plm_checkpoints.pkl")
+        if not clf_chkpt_path.exists():
+            logger.info("Downloading classifier checkpoints..")
+            url = "https://drive.google.com/uc?id=15_OFrrVUy9r9Urj-R2CjTRj_DHcazdAl"
+            gdown.download(url, str(clf_chkpt_path), quiet=False)
+        
+        return clf_chkpt_path
+    
+    def _validate_with_enzymeexplorer(self, input_fasta_path: str, output_csv_path: str):
+        run_id = f"{int(time() * 1000)}-{uuid4()}"
+        intermediate_outputs_root = f"_temp_dir_{run_id}"
+        if not Path(intermediate_outputs_root).exists():
+            Path(intermediate_outputs_root).mkdir(parents=True)
+        
+        args = SimpleNamespace()
+        args.batch_size = 4
+        args.clf_batch_size = 4096
+        args.max_len = 1022
+        args.model = self.enzymeexplorer_model
+        args.fasta_path = input_fasta_path
+        args.starting_i = 0
+        args.end_i = 700_000
+        args.output_id = ""
+        args.verbose = False
+        args.output_root = intermediate_outputs_root
+        args.ckpt_root_path = self.enzymeexplorer_checkpoint_path
+        args.detection_threshold = self.enzymeexplorer_detection_threshold
+        args.detect_precursor_synthases = self.enzymeexplorer_detect_precursor_synthases
+        args.gpu="0"
+        enzymeexplorer_tps_predict_fasta(args)
+
+        args = SimpleNamespace()
+        args.delete_individual_files = False
+        args.screening_results_root = f"{intermediate_outputs_root}/detections_plm"
+        args.output_path = output_csv_path
+        enzymeexplorer_gather_detections_to_csv(args)
+
+        rmtree(intermediate_outputs_root)
+
     def on_validation_epoch_end(self, trainer, pl_module):
+        if trainer.current_epoch % self.every_n_epochs != 0:
+            return
+        print("ValidateWithEnzymeExplorer on validation epoch", trainer.current_epoch)
+
         model = pl_module.model
         tokenizer = pl_module.model.decoder.net.tokenizer
 
+        # Generate sequences
         args = SimpleNamespace()
         args.seed = None
         args.architecture = type(model).__name__
@@ -395,9 +479,11 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         args.max_iter = self.max_iter
         args.batch_lens_together = True
         args.batch_size = self.generation_batch_size
-        args.cond_seq = None # TODO add to ValidateWithEnzymeExplorer
+        args.cond_seq = None # TODO add cond_seq support
         args.cache_dir = None
+        fasta_path = generate(args, model, tokenizer, verbose=False)
 
-        generate(args, model, tokenizer)
-
-        # TODO validate generated sequences with EnzymeExplorer
+        # Evaluate generated sequences with EnzymeExplorer
+        output_csv_path = fasta_path.replace(".fasta", "_enzyme_explorer_sequence_only.csv")
+        print("Validating generated sequences with EnzymeExplorer")
+        self._validate_with_enzymeexplorer(fasta_path, output_csv_path)

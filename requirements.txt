@@ -25,7 +25,7 @@ nbstripout      # remove output from jupyter notebooks
 
 # --------- others --------- #
 python-dotenv   # loading env variables from .env file
-rich            # beautiful text formatting in terminal
+rich==14.0.0    # beautiful text formatting in terminal
 pytest          # tests
 sh              # for running bash commands in some tests
 pudb            # debugger
@@ -39,18 +39,39 @@ dm-tree
 e3nn
 einops
 debugpy
-fair-esm
+# fair-esm
 lmdb
 matplotlib
 mdtraj
 ml-collections
 modelcif
 opt_einsum
-pandas
+# pandas
 peft==0.11.1
-scikit-learn
+# scikit-learn
 seaborn
 sympy
 tmtools
 transformers==4.39.2
 MDAnalysis
+
+# --------- EnzymeExplorer related --------- #
+EnzymeExplorer @ git+https://github.com/pluskal-lab/EnzymeExplorer.git
+# torch --index-url https://download.pytorch.org/whl/cu121
+epam.indigo
+openpyxl
+py3Dmol
+hdbscan==0.8.33
+scikit-learn-extra
+plotly
+fair-esm==2.0.0
+tables
+tqdm
+py-mcc-f1
+inquirer
+dataclasses-json
+scikit-optimize
+xgboost
+GPUtil
+wget
+gdown

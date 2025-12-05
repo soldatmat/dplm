@@ -115,8 +115,6 @@ def main():
     model, tokenizer = load_model(args)
     
     generate(args, model, tokenizer)
-    
-
 
 
 if __name__ == "__main__":

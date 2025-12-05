@@ -111,7 +111,7 @@ def initialize_generation_batched(
     return batches
 
 
-def generate_iteration(args, model, tokenizer, input_tokens, seq_len, class_ids=None):
+def generate_iteration(args, model, tokenizer, input_tokens, seq_len, class_ids=None, verbose=True):
     # batch fields: class_ids, prev_tokens (masked input tokens), 
 
     # Generate sequences
@@ -145,19 +145,17 @@ def generate_iteration(args, model, tokenizer, input_tokens, seq_len, class_ids=
             )
 
     # Extract generated sequences
-    print("final:")
     output_results = [
         "".join(seq.split(" "))
         for seq in tokenizer.batch_decode(
             output_tokens, skip_special_tokens=True
         )
     ]
-    pprint(output_results)
 
     return output_results
 
 
-def generate(args, model, tokenizer):
+def generate(args, model, tokenizer, verbose=True):
     if args.saveto is not None:
         os.makedirs(args.saveto, exist_ok=True)
         args_file = os.path.join(args.saveto, "args.json")
@@ -203,7 +201,7 @@ def generate(args, model, tokenizer):
             cond_seqs=cond_seqs, class_ids=class_ids, batch_size=args.batch_size, args=args
         )
         for input_tokens, class_ids_batch in batches:
-            generated_sequences = generate_iteration(args, model, tokenizer, input_tokens, max(args.seq_lens), class_ids=class_ids_batch)
+            generated_sequences = generate_iteration(args, model, tokenizer, input_tokens, max(args.seq_lens), class_ids=class_ids_batch, verbose=verbose)
             output_results.extend(generated_sequences)
     else:
         warnings.warn(
@@ -215,7 +213,7 @@ def generate(args, model, tokenizer):
             input_tokens, class_ids_out = initialize_generation(
                 num_seqs[i], seq_len, tokenizer, device, cond_seq=cond_seqs[i] if cond_seqs is not None else None, class_id=class_ids[i] if args.class_ids is not None else None, args=args
             )
-            generated_sequences = generate_iteration(args, model, tokenizer, input_tokens, seq_len, class_ids=class_ids_out)
+            generated_sequences = generate_iteration(args, model, tokenizer, input_tokens, seq_len, class_ids=class_ids_out, verbose=verbose)
             output_results.extend(generated_sequences)
     
     # Save generated sequences to fasta file
@@ -229,3 +227,5 @@ def generate(args, model, tokenizer):
             fp_save.write(f">SEQUENCE_{idx}\n")
             fp_save.write(f"{seq}\n")
         fp_save.close()
+
+    return saveto_name

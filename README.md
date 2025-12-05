@@ -84,11 +84,13 @@ cd dplm
 # create conda virtual environment
 env_name=dplm
 
-conda create -n ${env_name} python=3.9 pip
+conda create -n ${env_name} python=3.9 pip scikit-learn==1.5.1 pandas==2.2.2 numpy==1.26.4 scipy==1.13.0 jupyter foldseek==9.427df8a pymol-bundle pymol-psico==3.4.19 tmalign==20170708 bioconda::mmseqs2 mafft==7.525 iqtree==2.3.0 fastapi rdkit==2022.9.5
 conda activate ${env_name}
 
 # automatically install everything else
 bash scripts/install.sh
+
+pip install git+https://github.com/SamusRam/ProFun.git
 ```
 ## Load Pretrained Models
 Users can load DPLM/DPLM-2 checkpoint by:

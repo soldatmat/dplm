@@ -2,4 +2,4 @@ pip install torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https
 
 pip install -e .
 
-pip install -e vendor/openfold
+pip install -e vendor/openfold --no-build-isolation
