@@ -125,14 +125,14 @@ class ConditionalDPLMTrainingTask(TaskLitModule):
             log.info(f"Untrainable params (requires_grad is False): {sum(p.numel() for p in model.parameters() if not p.requires_grad):,}")
             log.info(f"Trainable params (requires_grad is True): {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
             log.info(f"Optimized params (in optimizer & requires_grad): {n_optimized_params:,}")
-            log.info("For the following parameters of the model, requires_grad is set to True:")
+            log.debug("For the following parameters of the model, requires_grad is set to True:")
             for name, param in self.model.named_parameters():
                 if param.requires_grad:
-                    log.info(f"   {name}, {param.size()} = {param.numel()} params")
-            log.info("The following parameters of the model are optimized by the optimizer (& have requires_grad=True):")
+                    log.debug(f"   {name}, {param.size()} = {param.numel()} params")
+            log.debug("The following parameters of the model are optimized by the optimizer (& have requires_grad=True):")
             for param, p_name in optimized_params:
                 if param.requires_grad:
-                    log.info(f"   {p_name}, {param.size()} = {param.numel()} params")
+                    log.debug(f"   {p_name}, {param.size()} = {param.numel()} params")
 
         print_trained_params(optimizer, self.trainer.model.module.model)
 
