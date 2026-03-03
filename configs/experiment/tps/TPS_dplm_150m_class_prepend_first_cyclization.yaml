@@ -43,6 +43,8 @@ model:
     output_logits: ${task.learning.output_encoder_logits}
     embedding_dim: 640 # 512
     n_classes: ${datamodule.n_classes}
+    weight_path: /storage/brno2/home/soldatmat/documents/terpene_synthases/data/MARTS-DB/2025-11-19/embeddings/dplm/150m_stage3_best/TPS_first_cyclization_embeddings_bos_class_mean.pt
+    frozen: true
 
   init_pred_where: true
 
@@ -82,10 +84,14 @@ task:
     use_draft_seq: true
 
 train:
-  # seed: 42 # does nothing
-  lr: 0.001 # is used
-  monitor: "val/acc_median"
-  mode: "max"
+  seed: 42 # does nothing
+  lr: 0.001 # original conditioning value
+  # monitor: "val/acc_median" # original conditioning value
+  # mode: "max" # original conditioning value
+  # lr: 0.0004 # original stage 3 value
+  monitor: "val/loss" # original stage 3 value
+  mode: "min" # original stage 3 value
+  patience: 1000 # original stage 3 value
 
 trainer:
   min_epochs: 10

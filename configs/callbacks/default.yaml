@@ -20,10 +20,10 @@ model_checkpoint:
   # save_on_train_epoch_end: true
   every_n_epochs: null
 
-early_stopping:
-  _target_: pytorch_lightning.callbacks.EarlyStopping
-  monitor: ${train.monitor} # name of the logged metric which determines when model is improving
-  mode: ${train.mode} # "max" means higher metric value is better, can be also "min"
-  patience: ${train.patience} # how many validation epochs of not improving until training stops
-  min_delta: 0 # minimum change in the monitored metric needed to qualify as an improvement
-  check_on_train_epoch_end: false
+# early_stopping:
+#   _target_: pytorch_lightning.callbacks.EarlyStopping
+#   monitor: ${train.monitor} # name of the logged metric which determines when model is improving
+#   mode: ${train.mode} # "max" means higher metric value is better, can be also "min"
+#   patience: ${train.patience} # how many validation epochs of not improving until training stops
+#   min_delta: 0 # minimum change in the monitored metric needed to qualify as an improvement
+#   check_on_train_epoch_end: false

@@ -153,6 +153,7 @@ run/logs
 
 # model weight
 *.ckpt
+data-bin/checkpoints/
 
 # pdb
 *.pdb

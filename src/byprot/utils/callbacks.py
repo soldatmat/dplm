@@ -39,8 +39,6 @@ from byprot.utils.generation import generate
 from enzymeexplorer.src.screening.tps_predict_fasta import main as enzymeexplorer_tps_predict_fasta
 from enzymeexplorer.src.screening.gather_detections_to_csv import main as enzymeexplorer_gather_detections_to_csv
 
-PLM_CHECKPOINT_DIR = "data/plm_checkpoints" # TODO set a permanent folder for EnzymeExplorer PLM checkpoints
-
 logger = utils.get_logger(__name__)
 
 
@@ -371,6 +369,7 @@ class ValidateWithEnzymeExplorer(pl.Callback):
     def __init__(
         self,
         template_sequences_file: str,
+        enzymeexplorer_checkpoint_dir: str,
         sequence_column_name: str = "sequence",
         class_id_column_name: str = None,
         max_iter: int = 500,
@@ -400,26 +399,27 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         self.enzymeexplorer_detection_threshold = enzymeexplorer_detection_threshold
         self.enzymeexplorer_detect_precursor_synthases = enzymeexplorer_detect_precursor_synthases
         self.enzymeexplorer_model = enzymeexplorer_model
-        self.enzymeexplorer_checkpoint_path = self._prepare_plm_checkpoint()
+        self.enzymeexplorer_checkpoint_dir = enzymeexplorer_checkpoint_dir
+        self.enzymeexplorer_classifier_checkpoint_path = self._prepare_plm_checkpoint()
 
         self.every_n_epochs = every_n_epochs
 
     def _prepare_plm_checkpoint(self):
-        plm_chkpt_path = Path(PLM_CHECKPOINT_DIR)
-        if not plm_chkpt_path.exists():
-            plm_chkpt_path.mkdir(parents=True)
+        self.enzymeexplorer_plm_checkpoint_dir = Path(self.enzymeexplorer_checkpoint_dir) / "plm_checkpoints"
+        if not self.enzymeexplorer_plm_checkpoint_dir.exists():
+            self.enzymeexplorer_plm_checkpoint_dir.mkdir(parents=True)
         assert self.enzymeexplorer_model in {
             "esm-1v",
             "esm-1v-finetuned-subseq",
             "ankh_tps",
             "ankh_base",
         }, f"Model {self.enzymeexplorer_model} is not supported. Choose between esm-1v, esm-1v-finetuned-subseq, ankh_base, and ankh_tps"
-        plm_path = plm_chkpt_path / ("checkpoint-tps-esm1v-t33-subseq.ckpt" if self.enzymeexplorer_model == "esm-1v-finetuned-subseq" else "tps_ankh_lr=5e-05_bs=32.pth")
+        plm_path = self.enzymeexplorer_plm_checkpoint_dir / ("checkpoint-tps-esm1v-t33-subseq.ckpt" if self.enzymeexplorer_model == "esm-1v-finetuned-subseq" else "tps_ankh_lr=5e-05_bs=32.pth")
         if not plm_path.exists():
             logger.info("Downloading TPS language model checkpoint..")
             url = "https://drive.google.com/uc?id=1jU76oUl0-CmiB9m3XhaKmI2HorFhyxC7"
             gdown.download(url, str(plm_path), quiet=False)
-        clf_chkpt_path = Path("data/classifier_plm_checkpoints.pkl")
+        clf_chkpt_path = Path(self.enzymeexplorer_checkpoint_dir) / "classifier_plm_checkpoints.pkl"
         if not clf_chkpt_path.exists():
             logger.info("Downloading classifier checkpoints..")
             url = "https://drive.google.com/uc?id=15_OFrrVUy9r9Urj-R2CjTRj_DHcazdAl"
@@ -444,7 +444,8 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         args.output_id = ""
         args.verbose = False
         args.output_root = intermediate_outputs_root
-        args.ckpt_root_path = self.enzymeexplorer_checkpoint_path
+        args.ckpt_root_path = self.enzymeexplorer_classifier_checkpoint_path
+        args.plm_checkpoint_dir = self.enzymeexplorer_plm_checkpoint_dir
         args.detection_threshold = self.enzymeexplorer_detection_threshold
         args.detect_precursor_synthases = self.enzymeexplorer_detect_precursor_synthases
         args.gpu="0"

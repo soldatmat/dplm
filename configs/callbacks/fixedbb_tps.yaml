@@ -15,13 +15,13 @@ model_checkpoint:
   every_n_epochs: 1
   # every_n_train_steps: 10
 
-early_stopping:
-  _target_: pytorch_lightning.callbacks.EarlyStopping
-  monitor: "val/acc_median" # name of the logged metric which determines when model is improving
-  mode: "max" # "max" means higher metric value is better, can be also "min"
-  patience: 30 # how many validation epochs of not improving until training stops
-  min_delta: 0 # minimum change in the monitored metric needed to qualify as an improvement
-  check_on_train_epoch_end: false
+# early_stopping:
+#   _target_: pytorch_lightning.callbacks.EarlyStopping
+#   monitor: "val/acc_median" # name of the logged metric which determines when model is improving
+#   mode: "max" # "max" means higher metric value is better, can be also "min"
+#   patience: 30 # how many validation epochs of not improving until training stops
+#   min_delta: 0 # minimum change in the monitored metric needed to qualify as an improvement
+#   check_on_train_epoch_end: false
 
 checkpoint_every_n_steps:
   _target_: byprot.utils.callbacks.CheckpointEveryNSteps
@@ -29,8 +29,9 @@ checkpoint_every_n_steps:
 
 validate_with_enzyme_explorer:
   _target_: byprot.utils.callbacks.ValidateWithEnzymeExplorer
-  every_n_epochs: 50
+  every_n_epochs: 100
   template_sequences_file: ${datamodule.data_path}
+  enzymeexplorer_checkpoint_dir: ${paths.root_dir}/data-bin/checkpoints/enzymeexplorer
   sequence_column_name: "Aminoacid_sequence"
   class_id_column_name: "First_cyclization_product_id"
   saveto: ${paths.log_dir}/enzyme_explorer_validation
