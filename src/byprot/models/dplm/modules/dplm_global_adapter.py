@@ -38,6 +38,8 @@ class DPLMWithGlobalAdapterConfig:
     adapter_dropout: float = field(default=0.1)
     encoder_d_model: int = field(default=512)
     encoder_conditioning_mode: str = field(default="cross_attention")  # cross_attention, expanded_cross_attention, sum, ignore
+    adapter_intermediate_size: int = field(default=320)
+    adapter_hidden_size: int = field(default=80)
     dplm_name: str = field(default="")
     from_huggingface: bool = field(default=True)
     net: NetConfig = field(default=NetConfig())
@@ -59,7 +61,10 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
             pass
         else:
             # change net.last_layer to GlobalAdapterLayer
-            adapter = GlobalAdapterLayer(cfg, deepcopy(net.config))
+            if cfg.encoder_conditioning_mode == "mini_cross_attention":
+                adapter = GlobalAdapterLayerMini(cfg, deepcopy(net.config))
+            else:
+                adapter = GlobalAdapterLayer(cfg, deepcopy(net.config))
             net_last_layer = net.esm.encoder.layer[-1]
             adapter.load_state_dict(net_last_layer.state_dict(), strict=False)
             net.esm.encoder.layer[-1] = adapter
@@ -232,32 +237,31 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
 
 
 class GlobalAdapterLayer(nn.Module):
-    def __init__(self, cfg, config):
+    def __init__(self, cfg, config, adapter_config=None, qdim=None):
+        if adapter_config is None:
+            adapter_config = deepcopy(config)
+
         super().__init__()
         self.seq_len_dim = 1
         self.attention = EsmAttention(config)
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.intermediate = EsmIntermediate(config)
         self.output = EsmOutput(config)
 
         kdim = vdim = getattr(cfg, "encoder_d_model", 512)
-        config.hidden_dropout_prob = getattr(cfg, "adapter_dropout", 0.0)
+        adapter_config.hidden_dropout_prob = getattr(cfg, "adapter_dropout", 0.0)
         self.adapter_crossattention = GlobalAdapterEsmAttention(
-            config, kdim=kdim, vdim=vdim
+            adapter_config, qdim=qdim, kdim=kdim, vdim=vdim
         )
-        # config.intermediate_size = config.hidden_size // 2 # Notes: bottleneck ffn
-        self.adapter_intermediate = EsmIntermediate(config)
-        self.adapter_output = EsmOutput(config)
-
-        self.LayerNorm = nn.LayerNorm(
-            config.hidden_size, eps=config.layer_norm_eps
-        )
-        self.adapter_LayerNorm = nn.LayerNorm(
-            config.hidden_size, eps=config.layer_norm_eps
-        )
+        
+        self.adapter_LayerNorm = nn.LayerNorm(adapter_config.hidden_size, eps=adapter_config.layer_norm_eps)
+        self.adapter_intermediate = EsmIntermediate(adapter_config)
+        self.adapter_output = EsmOutput(adapter_config)
 
         self.conditioning_mode = getattr(cfg, "encoder_conditioning_mode", "cross_attention")
         self.conditioning_chunk = {
             "cross_attention": self.cross_attention_conditioning_chunk,
+            "mini_cross_attention": self.cross_attention_conditioning_chunk,
             "expanded_cross_attention": self.expanded_cross_attention_conditioning_chunk,
             "sum": self.sum_conditioning_chunk,
             "ignore": self.ignore_conditioning_chunk,
@@ -385,11 +389,70 @@ class GlobalAdapterLayer(nn.Module):
         return layer_output
 
 
+class GlobalAdapterLayerMini(GlobalAdapterLayer):
+    def __init__(self, cfg, config):
+        adapter_config = deepcopy(config)
+        adapter_config.intermediate_size = getattr(cfg, "adapter_intermediate_size")
+        adapter_config.hidden_size = getattr(cfg, "adapter_hidden_size")
+        super().__init__(cfg, config, adapter_config=adapter_config, qdim=config.hidden_size)
+        self.downsize_layer = nn.Linear(config.hidden_size, adapter_config.hidden_size)
+        self.upsize_layer = nn.Linear(adapter_config.hidden_size, config.hidden_size)
+    
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        head_mask=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        past_key_value=None,
+        output_attentions=False,
+    ):
+        # self-attention
+        # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
+        self_attn_past_key_value = (
+            past_key_value[:2] if past_key_value is not None else None
+        )
+        self_attention_outputs = self.attention(
+            hidden_states,
+            attention_mask,
+            head_mask,
+            output_attentions=output_attentions,
+            past_key_value=self_attn_past_key_value,
+        )
+        attention_output = self_attention_outputs[0]
+
+        outputs = self_attention_outputs[
+            1:
+        ]  # add self attentions if we output attention weights
+
+        # first feed forward chunk
+        layer_output = self.feed_forward_chunk(attention_output)
+
+        # adapter begins
+        residual = layer_output
+
+        # conditioning with encoder output
+        conditioning_output = self.conditioning_chunk(layer_output, encoder_hidden_states, encoder_attention_mask)
+
+        # second feed forward chunk
+        conditioning_output = self.downsize_layer(conditioning_output) # Added in the Mini version
+        ffn_output = self.adapter_feed_forward_chunk(conditioning_output)
+        ffn_output = self.upsize_layer(ffn_output) # Added in the Mini version
+        ffn_output += residual
+
+        outputs = (ffn_output,) + outputs
+
+        return outputs
+
+
 class GlobalAdapterEsmSelfAttention(EsmSelfAttention):
     def __init__(
-        self, config, position_embedding_type=None, kdim=None, vdim=None
+        self, config, position_embedding_type=None, qdim=None, kdim=None, vdim=None
     ):
         super().__init__(config, position_embedding_type)
+        if qdim is not None:
+            self.query = nn.Linear(qdim, self.all_head_size)
         if kdim is not None:
             self.key = nn.Linear(kdim, self.all_head_size)
         if vdim is not None:
@@ -397,6 +460,9 @@ class GlobalAdapterEsmSelfAttention(EsmSelfAttention):
 
 
 class GlobalAdapterEsmAttention(EsmAttention):
-    def __init__(self, config, kdim=None, vdim=None):
+    def __init__(self, config, qdim=None, kdim=None, vdim=None):
         super().__init__(config)
-        self.self = GlobalAdapterEsmSelfAttention(config, kdim=kdim, vdim=vdim)
+        self.LayerNorm = nn.LayerNorm(config.hidden_size if qdim is None else qdim, eps=config.layer_norm_eps)
+        self.self = GlobalAdapterEsmSelfAttention(config, qdim=qdim, kdim=kdim, vdim=vdim)
+        if qdim is not None:
+            self.output.dense = nn.Linear(self.self.all_head_size, qdim)
