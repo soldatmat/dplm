@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from time import time
 from uuid import uuid4
 from shutil import rmtree
+import pickle
 
 # from pytorch_lightning.utilities.imports import _RICH_AVAILABLE
 from importlib.util import find_spec
@@ -36,7 +37,7 @@ import logging
 from byprot import utils
 from byprot.utils.generation import generate
 
-from enzymeexplorer.src.screening.tps_predict_fasta import main as enzymeexplorer_tps_predict_fasta
+from enzymeexplorer.src.screening.tps_predict_fasta import get_embedding_extractor, predict_tps
 from enzymeexplorer.src.screening.gather_detections_to_csv import main as enzymeexplorer_gather_detections_to_csv
 
 logger = utils.get_logger(__name__)
@@ -401,8 +402,19 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         self.enzymeexplorer_model = enzymeexplorer_model
         self.enzymeexplorer_checkpoint_dir = enzymeexplorer_checkpoint_dir
         self.enzymeexplorer_classifier_checkpoint_path = self._prepare_plm_checkpoint()
+        self.enzymeexplorer_max_len = 1022
 
         self.every_n_epochs = every_n_epochs
+
+        # args: model, plm_checkpoint_dir, max_len
+        args = SimpleNamespace()
+        args.model = self.enzymeexplorer_model
+        args.plm_checkpoint_dir = self.enzymeexplorer_plm_checkpoint_dir
+        args.max_len = self.enzymeexplorer_max_len
+        self.compute_embeddings_partial = get_embedding_extractor(args)
+
+        with open(self.enzymeexplorer_classifier_checkpoint_path, "rb") as file:
+            self.all_classifiers = pickle.load(file)
 
     def _prepare_plm_checkpoint(self):
         self.enzymeexplorer_plm_checkpoint_dir = Path(self.enzymeexplorer_checkpoint_dir) / "plm_checkpoints"
@@ -436,20 +448,17 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         args = SimpleNamespace()
         args.batch_size = 4
         args.clf_batch_size = 4096
-        args.max_len = 1022
-        args.model = self.enzymeexplorer_model
+        args.max_len = self.enzymeexplorer_max_len
         args.fasta_path = input_fasta_path
         args.starting_i = 0
         args.end_i = 700_000
         args.output_id = ""
         args.verbose = False
         args.output_root = intermediate_outputs_root
-        args.ckpt_root_path = self.enzymeexplorer_classifier_checkpoint_path
-        args.plm_checkpoint_dir = self.enzymeexplorer_plm_checkpoint_dir
         args.detection_threshold = self.enzymeexplorer_detection_threshold
         args.detect_precursor_synthases = self.enzymeexplorer_detect_precursor_synthases
         args.gpu="0"
-        enzymeexplorer_tps_predict_fasta(args)
+        predict_tps(args, self.compute_embeddings_partial, self.all_classifiers)
 
         args = SimpleNamespace()
         args.delete_individual_files = False
