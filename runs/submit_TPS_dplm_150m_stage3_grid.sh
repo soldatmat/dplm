@@ -12,11 +12,12 @@ EXP="tps/TPS_dplm_150m_stage3"
 RUN_PREFIX="${RUN_PREFIX:-TPS_dplm_150m_stage3_grid}"
 
 # Grid values
-TRAIN_LR_VALUES=(1e-4 1e-4 1e-4)
-WARMUP_STEPS_VALUES=(1000 2000 4000)
+TRAIN_LR_VALUES=(1e-3 1e-4 1e-5)
+WARMUP_STEPS_VALUES=(2000)
 # Supports absolute values (e.g. 1e-6) and relative values (e.g. 1e-1*tlr).
-LR_END_VALUES=(1e-6 1e-5 5e-5)
-WARMUP_INIT_LR_VALUES=(1e-8 1e-7 1e-6)
+LR_END_VALUES=(1e-1*tlr)
+WARMUP_INIT_LR_VALUES=(1e-3*tlr)
+LORA_ENABLE_VALUES=(true)
 
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -57,33 +58,36 @@ submit_job() {
     local warmup_steps="$2"
     local lr_end_raw="$3"
     local warmup_init_lr_raw="$4"
+    local lora_enable="$5"
     local lr_end
     local warmup_init_lr
 
     lr_end="$(resolve_lr_value "$lr_end_raw" "$train_lr")"
     warmup_init_lr="$(resolve_lr_value "$warmup_init_lr_raw" "$train_lr")"
 
-    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")"
+    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}"
     local lr_code
     local warmup_code
     local lr_end_code
     local warmup_init_code
+    local lora_code
     local job_name
 
     lr_code=$(value_code "$train_lr")
     lr_end_code=$(value_code "$lr_end")
     warmup_init_code=$(value_code "$warmup_init_lr")
+    lora_code=$([ "$lora_enable" = "true" ] && echo "t" || echo "f")
     if (( warmup_steps % 1000 == 0 )); then
         warmup_code="$((warmup_steps / 1000))k"
     else
         warmup_code="$warmup_steps"
     fi
 
-    job_name="d3l${lr_code}w${warmup_code}e${lr_end_code}i${warmup_init_code}"
+    job_name="d3l${lr_code}w${warmup_code}e${lr_end_code}i${warmup_init_code}${lora_code}"
     job_name=$(echo "$job_name" | cut -c1-15)
 
     if [[ "$DRY_RUN" == "1" ]]; then
-        echo "[DRY_RUN] qsub -N ${job_name} for ${run_name}"
+        echo "[DRY_RUN] qsub -N ${job_name} for ${run_name} with lora.enable=${lora_enable}"
         return 0
     fi
 
@@ -123,7 +127,8 @@ python train.py \
     train.lr=${train_lr} \
     task.lr_scheduler.warmup_steps=${warmup_steps} \
     task.lr_scheduler.lr_end=${lr_end} \
-    task.lr_scheduler.warmup_init_lr=${warmup_init_lr}
+    task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
+    model.lora.enable=${lora_enable}
 
 cp -r "\$SCRATCHDIR/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 
@@ -136,8 +141,10 @@ for train_lr in "${TRAIN_LR_VALUES[@]}"; do
     for warmup_steps in "${WARMUP_STEPS_VALUES[@]}"; do
         for lr_end in "${LR_END_VALUES[@]}"; do
             for warmup_init_lr in "${WARMUP_INIT_LR_VALUES[@]}"; do
-                submit_job "$train_lr" "$warmup_steps" "$lr_end" "$warmup_init_lr"
-                total=$((total + 1))
+                for lora_enable in "${LORA_ENABLE_VALUES[@]}"; do
+                    submit_job "$train_lr" "$warmup_steps" "$lr_end" "$warmup_init_lr" "$lora_enable"
+                    total=$((total + 1))
+                done
             done
         done
     done

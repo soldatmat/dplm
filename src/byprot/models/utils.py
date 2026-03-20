@@ -92,6 +92,8 @@ def get_net(cfg):
         # QKVO, MLP
         lora_target_module = cfg.lora.lora_target_module
         modules_to_save = cfg.lora.modules_to_save.split(",")
+        if modules_to_save == [""]:
+            modules_to_save = None
 
         peft_config = LoraConfig(
             task_type=TaskType.SEQ_2_SEQ_LM,

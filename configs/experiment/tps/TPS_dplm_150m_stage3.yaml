@@ -26,10 +26,11 @@ model:
   rdm_couple: false
   lora:
     enable: false
-    lora_rank: 16
+    lora_rank: 1 # original DPLM used 16
+    lora_alpha: 2
     lora_dropout: 0.1
-    lora_target_module: (esm.encoder.layer.[0-9]*.attention.(self.query|self.key|self.value|output.dense).*|esm.encoder.layer.[0-9]*.(intermediate|output).dense.*)
-    modules_to_save: lm_head,esm.embeddings
+    lora_target_module: (esm.(encoder.layer.[0-9]*.attention.(self.query|self.key|self.value|output.dense).*|esm.encoder.layer.[0-9]*.(intermediate|output).dense.*|lm_head.(dense|decoder)))
+    modules_to_save: "" # lm_head,esm.embeddings
   net:
     arch_type: esm
     name: airkingbd/dplm_150m
