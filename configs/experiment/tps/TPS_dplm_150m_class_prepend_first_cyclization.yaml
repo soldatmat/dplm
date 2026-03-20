@@ -36,7 +36,7 @@ model:
       lora_rank: 1 # original DPLM used 16
       lora_alpha: 2 # original DPLM used 32
       lora_dropout: 0.1
-      lora_target_module: esm.(encoder.layer.[0-9]*.(attention.(self.query|self.key|self.value|output.dense).*|(intermediate|output).dense.*))|lm_head.dense
+      lora_target_module: esm.(encoder.layer.[0-9]*.(attention.(self.query|self.key|self.value|output.dense).*|(intermediate|output).dense.*))|lm_head.(dense|decoder)
       modules_to_save: ""
   encoder:
     _target_: class_encoder
