@@ -12,11 +12,11 @@ defaults:
 # this allows you to overwrite only specified parameters
 
 # name of the run determines folder name in logs
-project: "TPS_DPLM_150m_class_first_cyclization"
-name: "tps_dplm_150m_class_first_cyclization"
+project: "TPS_DPLM_650m_class_prepend_first_cyclization"
+name: "tps_dplm_650m_class_prepend_first_cyclization"
 
 datamodule:
-  max_tokens: 8192 # original 6000
+  max_tokens: 4096 # original 6000
   # max_len: 1022
   class_column: First_cyclization_product
   n_classes: 25
@@ -27,19 +27,21 @@ model:
     num_diffusion_timesteps: 100
     adapter_dropout: 0.1
     from_huggingface: true
-    dplm_name: airkingbd/dplm_150m
-    # dplm_name: /storage/brno2/home/soldatmat/documents/terpene_synthases/dplm/logs/TPS_dplm_150m_stage3_run_8/checkpoints/best.ckpt
+    dplm_name: airkingbd/dplm_650m
     encoder_d_model: ${model.encoder.embedding_dim}
-    encoder_conditioning_mode: "cross_attention"
+    encoder_conditioning_mode: "prepend"
     lora:
-      enable: false
+      enable: true
+      lora_rank: 1 # original DPLM used 16
+      lora_alpha: 2 # original DPLM used 32
+      lora_dropout: 0.1
+      lora_target_module: esm.(encoder.layer.[0-9]*.(attention.(self.query|self.key|self.value|output.dense).*|(intermediate|output).dense.*))|lm_head.dense
+      modules_to_save: ""
   encoder:
     _target_: class_encoder
     output_logits: ${task.learning.output_encoder_logits}
-    embedding_dim: 640 # 512
+    embedding_dim: 1280
     n_classes: ${datamodule.n_classes}
-    weight_path: /storage/brno2/home/soldatmat/documents/terpene_synthases/data/MARTS-DB/2025-11-19/embeddings/dplm/150m_stage3_best/TPS_first_cyclization_embeddings_bos_class_mean.pt
-    frozen: true
 
   init_pred_where: true
 
@@ -56,7 +58,7 @@ task:
     _target_: byprot.modules.cross_entropy.RDMCrossEntropyLoss
     label_smoothing: 0.0
     ignore_index: 1
-  optimizer:
+  optimizer: # TODO ? change params for training to resemble cfg of DPLM training
     type: adamw
     _partial_: true
     lr: ${train.lr}
@@ -79,21 +81,17 @@ task:
     use_draft_seq: true
 
 train:
-  seed: 42 # does nothing
-  lr: 0.001 # original conditioning value
-  # monitor: "val/acc_median" # original conditioning value
-  # mode: "max" # original conditioning value
-  # lr: 0.0004 # original stage 3 value
-  monitor: "val/loss" # original stage 3 value
-  mode: "min" # original stage 3 value
-  patience: 1000 # original stage 3 value
+  # seed: 42 # does nothing
+  lr: 0.001 # is used
+  monitor: "val/acc_median"
+  mode: "max"
 
 trainer:
   min_epochs: 10
   max_epochs: 10000
   gradient_clip_val: 0.0
   # val_check_interval: 10
-  num_sanity_val_steps: -1
+  num_sanity_val_steps: 1
   reload_dataloaders_every_n_epochs: 1
   use_distributed_sampler: false
   max_steps: 200_000
@@ -101,4 +99,4 @@ trainer:
   check_val_every_n_epoch: 1
   val_check_interval: 1.0
   enable_progress_bar: true
-  fast_dev_run: false # set to true for debugging
+  fast_dev_run: true # set to true for debugging

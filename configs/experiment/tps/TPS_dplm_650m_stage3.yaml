@@ -76,12 +76,12 @@ trainer:
   min_epochs: 10
   max_epochs: 10000
   gradient_clip_val: 0.0
-  num_sanity_val_steps: 0
+  num_sanity_val_steps: -1
   reload_dataloaders_every_n_epochs: 1
   use_distributed_sampler: false
   max_steps: 200_000 # original 100_000
   accumulate_grad_batches: 1
-  check_val_every_n_epoch: null
-  val_check_interval: 1000
+  check_val_every_n_epoch: 10
+  val_check_interval: 1.0
   enable_progress_bar: true
   num_nodes: 1

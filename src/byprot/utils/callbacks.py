@@ -383,6 +383,8 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         enzymeexplorer_model: str = "esm-1v-finetuned-subseq",
         every_n_epochs: int = 1,
     ):
+        print("template_sequences_file:", template_sequences_file) # TODO delete
+        logger.info(f"template_sequences_file: {template_sequences_file}") # TODO delete
         data = pd.read_csv(template_sequences_file)
         self.seq_lens = data[sequence_column_name].apply(len).tolist()
         self.num_seqs = [1 for seq in self.seq_lens]
@@ -400,8 +402,12 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         self.enzymeexplorer_detection_threshold = enzymeexplorer_detection_threshold
         self.enzymeexplorer_detect_precursor_synthases = enzymeexplorer_detect_precursor_synthases
         self.enzymeexplorer_model = enzymeexplorer_model
+        print("enzymeexplorer_checkpoint_dir:", enzymeexplorer_checkpoint_dir) # TODO delete
+        logger.info(f"enzymeexplorer_checkpoint_dir: {enzymeexplorer_checkpoint_dir}") # TODO delete
         self.enzymeexplorer_checkpoint_dir = enzymeexplorer_checkpoint_dir
         self.enzymeexplorer_classifier_checkpoint_path = self._prepare_plm_checkpoint()
+        print("enzymeexplorer_classifier_checkpoint_path:", self.enzymeexplorer_classifier_checkpoint_path) # TODO delete
+        logger.info(f"enzymeexplorer_classifier_checkpoint_path: {self.enzymeexplorer_classifier_checkpoint_path}") # TODO delete
         self.enzymeexplorer_max_len = 1022
 
         self.every_n_epochs = every_n_epochs
@@ -415,6 +421,8 @@ class ValidateWithEnzymeExplorer(pl.Callback):
 
         with open(self.enzymeexplorer_classifier_checkpoint_path, "rb") as file:
             self.all_classifiers = pickle.load(file)
+        print("ValidateWithEnzymeExplorer init finished") # TODO delete
+        logger.info("ValidateWithEnzymeExplorer init finished") # TODO delete
 
     def _prepare_plm_checkpoint(self):
         self.enzymeexplorer_plm_checkpoint_dir = Path(self.enzymeexplorer_checkpoint_dir) / "plm_checkpoints"
@@ -469,12 +477,16 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         rmtree(intermediate_outputs_root)
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        if trainer.current_epoch % self.every_n_epochs != 0:
+        print("VALIDATE WITH ENZYME EXPLORER CALLBACK: on_validation_epoch_end called, trainer.current_epoch =", trainer.current_epoch) # TODO delete
+        if (trainer.current_epoch + 1) % self.every_n_epochs == 0: # epochs are numbered from 0 in PyTorch Lightning
+            print("ValidateWithEnzymeExplorer after train epoch", trainer.current_epoch + 1)
+        elif trainer.sanity_checking:
+            print("ValidateWithEnzymeExplorer before training")
+        else:
             return
-        print("ValidateWithEnzymeExplorer on validation epoch", trainer.current_epoch)
 
         model = pl_module.model
-        tokenizer = pl_module.model.decoder.net.tokenizer
+        tokenizer = pl_module.model.net.tokenizer if hasattr(pl_module.model, 'net') else pl_module.model.decoder.net.tokenizer
 
         # Generate sequences
         args = SimpleNamespace()
@@ -483,7 +495,7 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         args.num_seqs = self.num_seqs
         args.seq_lens = self.seq_lens
         args.class_ids = self.class_ids
-        args.saveto = os.path.join(self.saveto, "epoch_" + str(trainer.current_epoch))
+        args.saveto = os.path.join(self.saveto, "epoch_" + str(trainer.current_epoch + 1)) # epochs are numbered from 0 in PyTorch Lightning
         args.temperature = self.temperature
         args.sampling_strategy = self.sampling_strategy
         args.max_iter = self.max_iter
