@@ -142,14 +142,23 @@ class NoamScheduler(LambdaLR):
         super().__init__(optimizer, lr_lambda=lr_lambda)
 
 
-def polynomial_lr_schedule(
-    step, total_steps, warmup_steps, warmup_init_lr, lr, lr_end, power
-):
+def polynomial_lr_schedule(step, total_steps, warmup_steps, warmup_init_lr, lr, lr_end, power):
+    """
+    Compute the learning rate multiplier at a given training step.
+    
+    Schedule:
+    1. Warmup phase (0 to warmup_steps): Linear increase from warmup_init_lr to lr
+    2. Decay phase (warmup_steps to total_steps): Polynomial decay from lr to lr_end
+    3. Final phase (> total_steps): Constant at lr_end
+    """
     if step < warmup_steps:
+        # Linear warmup
         return warmup_init_lr + (lr - warmup_init_lr) * step / warmup_steps
     elif step > total_steps:
+        # After total_steps, use minimum learning rate
         return lr_end
     else:
+        # Polynomial decay phase
         return (
             lr_end
             + (lr - lr_end)
@@ -159,6 +168,8 @@ def polynomial_lr_schedule(
 
 
 class PolyNomialLRScheduler(LambdaLR):
+    """Polynomial decay learning rate scheduler with warmup."""
+
     def __init__(
         self,
         optimizer: Optimizer,
