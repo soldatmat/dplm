@@ -14,6 +14,7 @@ RUN_PREFIX="${RUN_PREFIX:-TPS_dplm_150m_stage3_grid}"
 # Grid values
 TRAIN_LR_VALUES=(1e-4 1e-4 1e-4)
 WARMUP_STEPS_VALUES=(1000 2000 4000)
+# Supports absolute values (e.g. 1e-6) and relative values (e.g. 1e-1*tlr).
 LR_END_VALUES=(1e-6 1e-5 5e-5)
 WARMUP_INIT_LR_VALUES=(1e-8 1e-7 1e-6)
 
@@ -33,11 +34,34 @@ value_code() {
     fi
 }
 
+resolve_lr_value() {
+    # Resolve values like "1e-1*tlr" or "tlr*1e-1" against the current train lr.
+    local value="$1"
+    local train_lr="$2"
+    local factor
+
+    if [[ "$value" =~ ^([0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?)\*tlr$ ]]; then
+        factor="${BASH_REMATCH[1]}"
+    elif [[ "$value" =~ ^tlr\*([0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?)$ ]]; then
+        factor="${BASH_REMATCH[1]}"
+    else
+        echo "$value"
+        return 0
+    fi
+
+    awk -v a="$train_lr" -v b="$factor" 'BEGIN { printf "%.12g", a * b }'
+}
+
 submit_job() {
     local train_lr="$1"
     local warmup_steps="$2"
-    local lr_end="$3"
-    local warmup_init_lr="$4"
+    local lr_end_raw="$3"
+    local warmup_init_lr_raw="$4"
+    local lr_end
+    local warmup_init_lr
+
+    lr_end="$(resolve_lr_value "$lr_end_raw" "$train_lr")"
+    warmup_init_lr="$(resolve_lr_value "$warmup_init_lr_raw" "$train_lr")"
 
     local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")"
     local lr_code
