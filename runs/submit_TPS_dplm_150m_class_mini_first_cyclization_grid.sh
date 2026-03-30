@@ -121,7 +121,7 @@ python train.py \
     train.lr=${train_lr} \
     task.lr_scheduler.warmup_steps=${warmup_steps} \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
-    model.lora.enable=${lora_enable}
+    model.decoder.lora.enable=${lora_enable}
 
 cp -r "\$SCRATCHDIR/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 

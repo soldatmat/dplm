@@ -87,7 +87,7 @@ submit_job() {
 
     qsub -N "$job_name" <<EOF
 #!/bin/bash
-#PBS -l select=1:ncpus=1:ngpus=1:gpu_mem=46gb:mem=32gb:scratch_local=40gb
+#PBS -l select=1:ncpus=1:ngpus=1:gpu_mem=46gb:mem=64gb:scratch_local=40gb
 #PBS -l walltime=72:00:00
 
 set -euo pipefail
@@ -121,7 +121,7 @@ python train.py \
     train.lr=${train_lr} \
     task.lr_scheduler.warmup_steps=${warmup_steps} \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
-    model.lora.enable=${lora_enable}
+    model.decoder.lora.enable=${lora_enable}
 
 cp -r "\$SCRATCHDIR/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 
