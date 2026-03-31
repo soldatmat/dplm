@@ -9,15 +9,16 @@ set -euo pipefail
 
 DATADIR="${DATADIR:-/storage/brno2/home/soldatmat/documents/terpene_synthases/dplm}"
 EXP="tps/TPS_dplm_150m_stage3"
-RUN_PREFIX="${RUN_PREFIX:-TPS_dplm_150m_stage3_grid}"
+RUN_PREFIX="${RUN_PREFIX:-TPS_dplm_150m_stage3_grid_run14}"
 
 # Grid values
-TRAIN_LR_VALUES=(1e-3 1e-4 1e-5)
+TRAIN_LR_VALUES=(1e-5 1e-6)
 WARMUP_STEPS_VALUES=(2000)
+MAX_STEPS_VALUES=(1000000)
 # Supports absolute values (e.g. 1e-6) and relative values (e.g. 1e-1*tlr).
 LR_END_VALUES=(1e-1*tlr)
 WARMUP_INIT_LR_VALUES=(1e-3*tlr)
-LORA_ENABLE_VALUES=(true)
+LORA_ENABLE_VALUES=(false true)
 
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -56,18 +57,20 @@ resolve_lr_value() {
 submit_job() {
     local train_lr="$1"
     local warmup_steps="$2"
-    local lr_end_raw="$3"
-    local warmup_init_lr_raw="$4"
-    local lora_enable="$5"
+    local max_steps="$3"
+    local lr_end_raw="$4"
+    local warmup_init_lr_raw="$5"
+    local lora_enable="$6"
     local lr_end
     local warmup_init_lr
 
     lr_end="$(resolve_lr_value "$lr_end_raw" "$train_lr")"
     warmup_init_lr="$(resolve_lr_value "$warmup_init_lr_raw" "$train_lr")"
 
-    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}"
+    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_ms${max_steps}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}"
     local lr_code
     local warmup_code
+    local max_steps_code
     local lr_end_code
     local warmup_init_code
     local lora_code
@@ -76,6 +79,7 @@ submit_job() {
     lr_code=$(value_code "$train_lr")
     lr_end_code=$(value_code "$lr_end")
     warmup_init_code=$(value_code "$warmup_init_lr")
+    max_steps_code=$(value_code "$max_steps")
     lora_code=$([ "$lora_enable" = "true" ] && echo "t" || echo "f")
     if (( warmup_steps % 1000 == 0 )); then
         warmup_code="$((warmup_steps / 1000))k"
@@ -83,11 +87,11 @@ submit_job() {
         warmup_code="$warmup_steps"
     fi
 
-    job_name="d3l${lr_code}w${warmup_code}e${lr_end_code}i${warmup_init_code}${lora_code}"
+    job_name="d3l${lr_code}w${warmup_code}m${max_steps_code}e${lr_end_code}i${warmup_init_code}${lora_code}"
     job_name=$(echo "$job_name" | cut -c1-15)
 
     if [[ "$DRY_RUN" == "1" ]]; then
-        echo "[DRY_RUN] qsub -N ${job_name} for ${run_name} with lora.enable=${lora_enable}"
+        echo "[DRY_RUN] qsub -N ${job_name} for ${run_name} with trainer.max_steps=${max_steps}, lora.enable=${lora_enable}"
         return 0
     fi
 
@@ -126,6 +130,7 @@ python train.py \
     paths.log_dir=\$SCRATCHDIR/dplm/logs/\${run_name} \
     train.lr=${train_lr} \
     task.lr_scheduler.warmup_steps=${warmup_steps} \
+    trainer.max_steps=${max_steps} \
     task.lr_scheduler.lr_end=${lr_end} \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
     model.lora.enable=${lora_enable}
@@ -139,11 +144,13 @@ EOF
 total=0
 for train_lr in "${TRAIN_LR_VALUES[@]}"; do
     for warmup_steps in "${WARMUP_STEPS_VALUES[@]}"; do
-        for lr_end in "${LR_END_VALUES[@]}"; do
-            for warmup_init_lr in "${WARMUP_INIT_LR_VALUES[@]}"; do
-                for lora_enable in "${LORA_ENABLE_VALUES[@]}"; do
-                    submit_job "$train_lr" "$warmup_steps" "$lr_end" "$warmup_init_lr" "$lora_enable"
-                    total=$((total + 1))
+        for max_steps in "${MAX_STEPS_VALUES[@]}"; do
+            for lr_end in "${LR_END_VALUES[@]}"; do
+                for warmup_init_lr in "${WARMUP_INIT_LR_VALUES[@]}"; do
+                    for lora_enable in "${LORA_ENABLE_VALUES[@]}"; do
+                        submit_job "$train_lr" "$warmup_steps" "$max_steps" "$lr_end" "$warmup_init_lr" "$lora_enable"
+                        total=$((total + 1))
+                    done
                 done
             done
         done
