@@ -1,26 +1,92 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage:
-#   bash runs/dplm/submit_TPS_dplm_150m_stage3_grid.sh
+# Submit TPS dPLM grid jobs for PBS (MetaCentrum) or Slurm (Karolina).
 #
-# Optional environment overrides:
-#   DATADIR=<path> RUN_PREFIX=<prefix> DRY_RUN=1 bash runs/dplm/submit_TPS_dplm_150m_stage3_grid.sh
+# Syntax:
+#   [VAR=value ...] bash runs/dplm/submit_TPS_dplm_150m_stage3_grid.sh
+#
+# Examples:
+#   DRY_RUN=1 bash runs/dplm/submit_TPS_dplm_150m_stage3_grid.sh
+#   CLUSTER=karolina DRY_RUN=1 bash runs/dplm/submit_TPS_dplm_150m_stage3_grid.sh
+#   CLUSTER=karolina SCHEDULER_TYPE=slurm bash runs/dplm/submit_TPS_dplm_150m_stage3_grid.sh
+#
+# Common overrides: DATADIR, RUN_PREFIX, DRY_RUN, CLUSTER, SCHEDULER_TYPE, SCHEDULER_RESOURCE_SPEC, JOB_*.
+
+# -------------------------
+# User-Configurable Variables
+# -------------------------
 
 DATADIR="${DATADIR:-/storage/brno2/home/soldatmat/documents/terpene_synthases/dplm}"
-EXP="tps/TPS_dplm_150m_stage3"
-RUN_PREFIX="${RUN_PREFIX:-TPS_dplm_150m_stage3_grid_run14}"
-
-# Grid values
-TRAIN_LR_VALUES=(1e-5 1e-6)
-WARMUP_STEPS_VALUES=(2000)
-MAX_STEPS_VALUES=(1000000)
-# Supports absolute values (e.g. 1e-6) and relative values (e.g. 1e-1*tlr).
-LR_END_VALUES=(1e-1*tlr)
-WARMUP_INIT_LR_VALUES=(1e-3*tlr)
-LORA_ENABLE_VALUES=(false true)
-
+EXP="${EXP:-tps/TPS_dplm_150m_stage3}"
+RUN_PREFIX="${RUN_PREFIX:-TPS_dplm_150m_stage3_grid}"
 DRY_RUN="${DRY_RUN:-0}"
+
+CLUSTER="${CLUSTER:-metacentrum}"
+SCHEDULER_TYPE="${SCHEDULER_TYPE:-}"
+SCHEDULER_RESOURCE_SPEC="${SCHEDULER_RESOURCE_SPEC:-}"
+
+JOB_NODES="${JOB_NODES:-1}"
+JOB_NCPUS="${JOB_NCPUS:-1}"
+JOB_NGPUS="${JOB_NGPUS:-1}"
+JOB_GPU_MEM="${JOB_GPU_MEM:-46gb}"
+JOB_MEM_PBS="${JOB_MEM_PBS:-64gb}"
+JOB_MEM_SLURM="${JOB_MEM_SLURM:-64G}"
+JOB_SCRATCH_LOCAL="${JOB_SCRATCH_LOCAL:-40gb}"
+JOB_WALLTIME="${JOB_WALLTIME:-24:00:00}"
+
+TRAIN_LR_LIST="${TRAIN_LR_LIST:-1e-3 1e-4 1e-5}"
+WARMUP_STEPS_LIST="${WARMUP_STEPS_LIST:-2000}"
+LR_END_LIST="${LR_END_LIST:-1e-1*tlr}"
+WARMUP_INIT_LR_LIST="${WARMUP_INIT_LR_LIST:-1e-3*tlr}"
+LORA_ENABLE_LIST="${LORA_ENABLE_LIST:-true}"
+
+DEFAULT_RESOURCE_SPEC=""
+
+# -------------------------
+# Internal Setup And Validation
+# -------------------------
+
+if [[ "$CLUSTER" == "metacentrum" ]]; then
+    SCHEDULER_TYPE="${SCHEDULER_TYPE:-pbs}"
+    printf -v DEFAULT_RESOURCE_SPEC '%s\n%s' \
+        "#PBS -l select=${JOB_NODES}:ncpus=${JOB_NCPUS}:ngpus=${JOB_NGPUS}:gpu_mem=${JOB_GPU_MEM}:mem=${JOB_MEM_PBS}:scratch_local=${JOB_SCRATCH_LOCAL}" \
+        "#PBS -l walltime=${JOB_WALLTIME}"
+    if [[ -z "$SCHEDULER_RESOURCE_SPEC" ]]; then
+        SCHEDULER_RESOURCE_SPEC="$DEFAULT_RESOURCE_SPEC"
+    fi
+elif [[ "$CLUSTER" == "karolina" ]]; then
+    SCHEDULER_TYPE="${SCHEDULER_TYPE:-slurm}"
+    # Karolina typically uses Slurm. Override as needed for your partition/QoS.
+    printf -v DEFAULT_RESOURCE_SPEC '%s\n%s\n%s\n%s\n%s' \
+        "#SBATCH --nodes=${JOB_NODES}" \
+        "#SBATCH --gres=gpu:${JOB_NGPUS}" \
+        "#SBATCH --cpus-per-task=${JOB_NCPUS}" \
+        "#SBATCH --mem=${JOB_MEM_SLURM}" \
+        "#SBATCH --time=${JOB_WALLTIME}"
+    if [[ -z "$SCHEDULER_RESOURCE_SPEC" ]]; then
+        SCHEDULER_RESOURCE_SPEC="$DEFAULT_RESOURCE_SPEC"
+    fi
+else
+    echo >&2 "Unsupported CLUSTER='$CLUSTER'. Use 'metacentrum' or 'karolina', or set SCHEDULER_RESOURCE_SPEC manually."
+    exit 1
+fi
+
+if [[ "$SCHEDULER_TYPE" != "pbs" && "$SCHEDULER_TYPE" != "slurm" ]]; then
+    echo >&2 "Unsupported SCHEDULER_TYPE='$SCHEDULER_TYPE'. Use 'pbs' or 'slurm'."
+    exit 1
+fi
+
+read -r -a TRAIN_LR_VALUES <<< "$TRAIN_LR_LIST"
+read -r -a WARMUP_STEPS_VALUES <<< "$WARMUP_STEPS_LIST"
+# Supports absolute values (e.g. 1e-6) and relative values (e.g. 1e-1*tlr).
+read -r -a LR_END_VALUES <<< "$LR_END_LIST"
+read -r -a WARMUP_INIT_LR_VALUES <<< "$WARMUP_INIT_LR_LIST"
+read -r -a LORA_ENABLE_VALUES <<< "$LORA_ENABLE_LIST"
+
+# -------------------------
+# Script Logic
+# -------------------------
 
 sanitize_float() {
     # Convert values like 4e-4 to filesystem-safe tokens like 4em4.
@@ -91,14 +157,18 @@ submit_job() {
     job_name=$(echo "$job_name" | cut -c1-15)
 
     if [[ "$DRY_RUN" == "1" ]]; then
-        echo "[DRY_RUN] qsub -N ${job_name} for ${run_name} with trainer.max_steps=${max_steps}, lora.enable=${lora_enable}"
+        if [[ "$SCHEDULER_TYPE" == "pbs" ]]; then
+            echo "[DRY_RUN] qsub -N ${job_name} for ${run_name} with lora.enable=${lora_enable}"
+        else
+            echo "[DRY_RUN] sbatch --job-name=${job_name} for ${run_name} with lora.enable=${lora_enable}"
+        fi
         return 0
     fi
 
-    qsub -N "$job_name" <<EOF
+    if [[ "$SCHEDULER_TYPE" == "pbs" ]]; then
+        qsub -N "$job_name" <<EOF
 #!/bin/bash
-#PBS -l select=1:ncpus=1:ngpus=1:gpu_mem=46gb:mem=64gb:scratch_local=40gb
-#PBS -l walltime=24:00:00
+${SCHEDULER_RESOURCE_SPEC}
 
 set -euo pipefail
 
@@ -109,14 +179,21 @@ run_name="${run_name}"
 DATADIR="${DATADIR}"
 
 mkdir -p "\$DATADIR/logs/\${run_name}"
-echo "\$PBS_JOBID is running on node \$(hostname -f) in a scratch directory \$SCRATCHDIR" >> "\$DATADIR/logs/\${run_name}/job_info.txt"
+job_id="\${PBS_JOBID:-\${SLURM_JOB_ID:-unknown}}"
+echo "\$job_id is running on node \$(hostname -f)" >> "\$DATADIR/logs/\${run_name}/job_info.txt"
 
-test -n "\$SCRATCHDIR" || { echo >&2 "Variable SCRATCHDIR is not set!"; exit 1; }
-mkdir -p "\$SCRATCHDIR/tmp"
-export TMPDIR="\$SCRATCHDIR/tmp"
+if [[ -n "\${SCRATCHDIR:-}" ]]; then
+    work_scratch="\$SCRATCHDIR"
+else
+    work_scratch="\$(mktemp -d /tmp/dplm_\${run_name}_XXXXXX)"
+    trap 'rm -rf "\$work_scratch"' EXIT
+fi
 
-mkdir -p "\$SCRATCHDIR/dplm"
-cp -r "\$DATADIR/data-bin" "\$SCRATCHDIR/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }
+mkdir -p "\$work_scratch/tmp"
+export TMPDIR="\$work_scratch/tmp"
+
+mkdir -p "\$work_scratch/dplm"
+cp -r "\$DATADIR/data-bin" "\$work_scratch/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }
 
 module add mambaforge
 mamba activate /storage/brno2/home/soldatmat/.conda/envs/dplm
@@ -126,8 +203,8 @@ cd "\$DATADIR"
 python train.py \
     experiment=\${exp} \
     name=\${run_name} \
-    paths.data_dir=\$SCRATCHDIR/dplm/data-bin \
-    paths.log_dir=\$SCRATCHDIR/dplm/logs/\${run_name} \
+    paths.data_dir=\$work_scratch/dplm/data-bin \
+    paths.log_dir=\$work_scratch/dplm/logs/\${run_name} \
     train.lr=${train_lr} \
     task.lr_scheduler.warmup_steps=${warmup_steps} \
     trainer.max_steps=${max_steps} \
@@ -135,10 +212,65 @@ python train.py \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
     model.lora.enable=${lora_enable}
 
-cp -r "\$SCRATCHDIR/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
+cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 
-clean_scratch
+if command -v clean_scratch >/dev/null 2>&1; then
+    clean_scratch
+fi
 EOF
+    else
+        sbatch --job-name="$job_name" <<EOF
+#!/bin/bash
+${SCHEDULER_RESOURCE_SPEC}
+
+set -euo pipefail
+
+export CUDA_VISIBLE_DEVICES=0,
+exp="${EXP}"
+run_name="${run_name}"
+
+DATADIR="${DATADIR}"
+
+mkdir -p "\$DATADIR/logs/\${run_name}"
+job_id="\${PBS_JOBID:-\${SLURM_JOB_ID:-unknown}}"
+echo "\$job_id is running on node \$(hostname -f)" >> "\$DATADIR/logs/\${run_name}/job_info.txt"
+
+if [[ -n "\${SCRATCHDIR:-}" ]]; then
+    work_scratch="\$SCRATCHDIR"
+else
+    work_scratch="\$(mktemp -d /tmp/dplm_\${run_name}_XXXXXX)"
+    trap 'rm -rf "\$work_scratch"' EXIT
+fi
+
+mkdir -p "\$work_scratch/tmp"
+export TMPDIR="\$work_scratch/tmp"
+
+mkdir -p "\$work_scratch/dplm"
+cp -r "\$DATADIR/data-bin" "\$work_scratch/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }
+
+module add mambaforge
+mamba activate /storage/brno2/home/soldatmat/.conda/envs/dplm
+
+cd "\$DATADIR"
+
+python train.py \
+    experiment=\${exp} \
+    name=\${run_name} \
+    paths.data_dir=\$work_scratch/dplm/data-bin \
+    paths.log_dir=\$work_scratch/dplm/logs/\${run_name} \
+    train.lr=${train_lr} \
+    task.lr_scheduler.warmup_steps=${warmup_steps} \
+    task.lr_scheduler.lr_end=${lr_end} \
+    task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
+    model.lora.enable=${lora_enable}
+
+cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
+
+if command -v clean_scratch >/dev/null 2>&1; then
+    clean_scratch
+fi
+EOF
+    fi
 }
 
 total=0
