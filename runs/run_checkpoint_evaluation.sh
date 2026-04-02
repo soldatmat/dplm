@@ -43,12 +43,13 @@ PROJECT_ID="${PROJECT_ID:-}"
 
 GEN_NUM_SEQS="${GEN_NUM_SEQS:-10}"
 GEN_SEQ_LENS="${GEN_SEQ_LENS:-330}"
-GEN_MAX_ITER="${GEN_MAX_ITER:-500}"
-GEN_BATCH_SIZE="${GEN_BATCH_SIZE:-32}"
+GEN_SEQUENCE_COLUMN_NAME="${GEN_SEQUENCE_COLUMN_NAME:-Aminoacid_sequence}"
+GEN_MAX_ITER="${GEN_MAX_ITER:-10}"
+GEN_BATCH_SIZE="${GEN_BATCH_SIZE:-256}"
 GEN_SAMPLING_STRATEGY="${GEN_SAMPLING_STRATEGY:-gumbel_argmax}"
 GEN_TEMPERATURE="${GEN_TEMPERATURE:-1.0}"
 
-ENZYME_EXPLORER_TEMPLATE_SEQS="${ENZYME_EXPLORER_TEMPLATE_SEQS:-tps_scaffolds.csv}"
+ENZYME_EXPLORER_TEMPLATE_SEQS="${ENZYME_EXPLORER_TEMPLATE_SEQS:-dplm/data-bin/MARTS-DB/2025-11-19/TPS_sequences.csv}"
 ENZYME_EXPLORER_CHECKPOINT_DIR="${ENZYME_EXPLORER_CHECKPOINT_DIR:-data-bin/checkpoints/enzymeexplorer}"
 ENZYME_EXPLORER_DETECTION_THRESHOLD="${ENZYME_EXPLORER_DETECTION_THRESHOLD:-0.0}"
 ENZYME_EXPLORER_DETECT_PRECURSOR_SYNTHASES="${ENZYME_EXPLORER_DETECT_PRECURSOR_SYNTHASES:-true}"
@@ -178,8 +179,7 @@ python evaluate_checkpoint.py --config-path ../configs \
     +eval_name='"$EVAL_NAME"' \
     +datadir='"$DATADIR"' \
     hydra.run.dir='"$DATADIR/logs/$EVAL_NAME/hydra"' \
-    +gen_num_seqs="${GEN_NUM_SEQS}" \
-    +gen_seq_lens="${GEN_SEQ_LENS}" \
+    +gen_sequence_column_name='"${GEN_SEQUENCE_COLUMN_NAME}"' \
     +gen_max_iter="${GEN_MAX_ITER}" \
     +gen_batch_size="${GEN_BATCH_SIZE}" \
     +gen_sampling_strategy="${GEN_SAMPLING_STRATEGY}" \
@@ -256,8 +256,7 @@ conda run "\${CONDA_RUN_ARGS[@]}" python evaluate_checkpoint.py --config-path ..
     +eval_name='"$EVAL_NAME"' \
     +datadir='"$DATADIR"' \
     hydra.run.dir='"$DATADIR/logs/$EVAL_NAME/hydra"' \
-    +gen_num_seqs="${GEN_NUM_SEQS}" \
-    +gen_seq_lens="${GEN_SEQ_LENS}" \
+    +gen_sequence_column_name='"${GEN_SEQUENCE_COLUMN_NAME}"' \
     +gen_max_iter="${GEN_MAX_ITER}" \
     +gen_batch_size="${GEN_BATCH_SIZE}" \
     +gen_sampling_strategy="${GEN_SAMPLING_STRATEGY}" \

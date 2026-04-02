@@ -16,6 +16,7 @@ from shutil import rmtree
 import pickle
 
 import hydra
+import pandas as pd
 from omegaconf import OmegaConf, DictConfig
 import pytorch_lightning as pl
 import torch
@@ -70,6 +71,24 @@ def _resolve_under_datadir(path_value: str, datadir: Path) -> Path:
         path_obj = Path(*parts[1:]) if len(parts) > 1 else Path(".")
 
     return datadir / path_obj
+
+
+def _build_generation_plan_from_template(
+    template_sequences_file: Path,
+    sequence_column_name: str,
+):
+    data = pd.read_csv(template_sequences_file)
+    if sequence_column_name not in data.columns:
+        raise ValueError(
+            f"Column '{sequence_column_name}' not found in template file: {template_sequences_file}"
+        )
+
+    seq_lens = data[sequence_column_name].apply(len).tolist()
+    if not seq_lens:
+        raise ValueError(f"No sequences found in template file: {template_sequences_file}")
+
+    num_seqs = [1 for _ in seq_lens]
+    return num_seqs, seq_lens
 
 
 def validate_with_enzyme_explorer(
@@ -182,10 +201,9 @@ def main(cfg: DictConfig):
     logs_dir.mkdir(parents=True, exist_ok=True)
     
     # Generation parameters
-    gen_num_seqs = cfg.get("gen_num_seqs", 10)
-    gen_seq_lens = cfg.get("gen_seq_lens", 330)
-    gen_max_iter = cfg.get("gen_max_iter", 500)
-    gen_batch_size = cfg.get("gen_batch_size", 32)
+    gen_sequence_column_name = cfg.get("gen_sequence_column_name", "Aminoacid_sequence")
+    gen_max_iter = cfg.get("gen_max_iter", 10)
+    gen_batch_size = cfg.get("gen_batch_size", 256)
     gen_sampling_strategy = cfg.get("gen_sampling_strategy", "gumbel_argmax")
     gen_temperature = cfg.get("gen_temperature", 1.0)
     
@@ -210,6 +228,11 @@ def main(cfg: DictConfig):
     enzyme_explorer_checkpoint_dir = _resolve_under_datadir(
         str(enzyme_explorer_checkpoint_dir), datadir
     )
+
+    num_seqs, seq_lens = _build_generation_plan_from_template(
+        enzyme_explorer_template_seqs,
+        str(gen_sequence_column_name),
+    )
     
     print(f"Loading model from checkpoint: {checkpoint_path}")
     model = load_model_from_checkpoint(str(checkpoint_path), cfg)
@@ -222,15 +245,18 @@ def main(cfg: DictConfig):
     )
     
     # Generate sequences
-    print(f"Generating {gen_num_seqs} sequences with length {gen_seq_lens}...")
+    print(
+        f"Generating {len(num_seqs)} sequences from template lengths in: "
+        f"{enzyme_explorer_template_seqs}"
+    )
     gen_output_dir = logs_dir / "generated_sequences"
     gen_output_dir.mkdir(parents=True, exist_ok=True)
     
     args = SimpleNamespace()
     args.seed = None
     args.architecture = type(model.model).__name__
-    args.num_seqs = [gen_num_seqs]
-    args.seq_lens = [int(gen_seq_lens)]
+    args.num_seqs = num_seqs
+    args.seq_lens = seq_lens
     args.class_ids = None
     args.saveto = str(gen_output_dir)
     args.temperature = float(gen_temperature)
