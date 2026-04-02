@@ -22,7 +22,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 DATADIR="${DATADIR:-$REPO_ROOT}"
 CHECKPOINT="${CHECKPOINT:-logs/TPS_dplm_150m_stage3_run_8/checkpoints/N-Step-Checkpoint_epoch=172_step=20000.ckpt}"
-EVAL_NAME="${EVAL_NAME:-checkpoint_eval}"
+EVAL_NAME="${EVAL_NAME:-}"
 EVAL_EXPERIMENT="${EVAL_EXPERIMENT:-tps/TPS_dplm_150m_stage3}"
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -43,6 +43,7 @@ PROJECT_ID="${PROJECT_ID:-}"
 
 GEN_NUM_SEQS="${GEN_NUM_SEQS:-10}"
 GEN_SEQ_LENS="${GEN_SEQ_LENS:-330}"
+GEN_USE_TEMPLATE="${GEN_USE_TEMPLATE:-true}"
 GEN_SEQUENCE_COLUMN_NAME="${GEN_SEQUENCE_COLUMN_NAME:-Aminoacid_sequence}"
 GEN_MAX_ITER="${GEN_MAX_ITER:-10}"
 GEN_BATCH_SIZE="${GEN_BATCH_SIZE:-256}"
@@ -77,11 +78,54 @@ resolve_path_under_datadir() {
     printf '%s/%s' "$DATADIR" "$path_value"
 }
 
+sanitize_name_component() {
+    local value="$1"
+    value="${value// /_}"
+    value="${value//[^a-zA-Z0-9._-]/-}"
+    value="${value##[-_]}"
+    value="${value%%[-_]}"
+    if [[ -z "$value" ]]; then
+        value="unknown"
+    fi
+    printf '%s' "$value"
+}
+
+derive_eval_name_from_checkpoint() {
+    local checkpoint_path="$1"
+    local checkpoint_name
+
+    checkpoint_name="$(basename "$checkpoint_path")"
+    checkpoint_name="${checkpoint_name%.ckpt}"
+    checkpoint_name="$(sanitize_name_component "$checkpoint_name")"
+
+    printf 'checkpoint_eval_%s' "$checkpoint_name"
+}
+
+derive_seqlen_suffix() {
+    local seq_lens_value="$1"
+    local first_len
+
+    first_len="${seq_lens_value%%,*}"
+    first_len="${first_len%%:*}"
+    first_len="${first_len// /}"
+    first_len="$(sanitize_name_component "$first_len")"
+
+    printf 'seqlen%s' "$first_len"
+}
+
 # Normalize path-like inputs so the script is robust regardless of caller CWD.
 DATADIR="$(cd "$DATADIR" && pwd)"
 CHECKPOINT="$(resolve_path_under_datadir "$CHECKPOINT")"
 ENZYME_EXPLORER_TEMPLATE_SEQS="$(resolve_path_under_datadir "$ENZYME_EXPLORER_TEMPLATE_SEQS")"
 ENZYME_EXPLORER_CHECKPOINT_DIR="$(resolve_path_under_datadir "$ENZYME_EXPLORER_CHECKPOINT_DIR")"
+if [[ -z "$EVAL_NAME" ]]; then
+    EVAL_NAME="$(derive_eval_name_from_checkpoint "$CHECKPOINT")"
+    case "${GEN_USE_TEMPLATE,,}" in
+        false|0|no)
+            EVAL_NAME+="_$(derive_seqlen_suffix "$GEN_SEQ_LENS")"
+            ;;
+    esac
+fi
 
 # -------------------------
 # Internal Setup And Validation
@@ -132,6 +176,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
     else
         echo "[DRY_RUN] sbatch for checkpoint evaluation: $CHECKPOINT"
     fi
+    echo "[DRY_RUN] eval logs folder: $DATADIR/logs/$EVAL_NAME"
     exit 0
 fi
 
@@ -179,6 +224,9 @@ python evaluate_checkpoint.py --config-path ../configs \
     +eval_name='"$EVAL_NAME"' \
     +datadir='"$DATADIR"' \
     hydra.run.dir='"$DATADIR/logs/$EVAL_NAME/hydra"' \
+    +gen_use_template="${GEN_USE_TEMPLATE}" \
+    +gen_num_seqs="${GEN_NUM_SEQS}" \
+    +gen_seq_lens="${GEN_SEQ_LENS}" \
     +gen_sequence_column_name='"${GEN_SEQUENCE_COLUMN_NAME}"' \
     +gen_max_iter="${GEN_MAX_ITER}" \
     +gen_batch_size="${GEN_BATCH_SIZE}" \
@@ -256,6 +304,9 @@ conda run "\${CONDA_RUN_ARGS[@]}" python evaluate_checkpoint.py --config-path ..
     +eval_name='"$EVAL_NAME"' \
     +datadir='"$DATADIR"' \
     hydra.run.dir='"$DATADIR/logs/$EVAL_NAME/hydra"' \
+    +gen_use_template="${GEN_USE_TEMPLATE}" \
+    +gen_num_seqs="${GEN_NUM_SEQS}" \
+    +gen_seq_lens="${GEN_SEQ_LENS}" \
     +gen_sequence_column_name='"${GEN_SEQUENCE_COLUMN_NAME}"' \
     +gen_max_iter="${GEN_MAX_ITER}" \
     +gen_batch_size="${GEN_BATCH_SIZE}" \

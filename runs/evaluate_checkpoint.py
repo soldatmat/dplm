@@ -91,6 +91,19 @@ def _build_generation_plan_from_template(
     return num_seqs, seq_lens
 
 
+def _parse_int_list(value, field_name: str):
+    if isinstance(value, int):
+        return [int(value)]
+    if isinstance(value, (list, tuple)):
+        return [int(v) for v in value]
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.split(",") if p.strip()]
+        if not parts:
+            raise ValueError(f"No values provided for {field_name}")
+        return [int(v) for v in parts]
+    raise TypeError(f"Unsupported type for {field_name}: {type(value)}")
+
+
 def validate_with_enzyme_explorer(
     input_fasta_path: str,
     output_csv_path: str,
@@ -201,7 +214,17 @@ def main(cfg: DictConfig):
     logs_dir.mkdir(parents=True, exist_ok=True)
     
     # Generation parameters
+    gen_use_template = cfg.get("gen_use_template", True)
+    if isinstance(gen_use_template, str):
+        gen_use_template = gen_use_template.strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
     gen_sequence_column_name = cfg.get("gen_sequence_column_name", "Aminoacid_sequence")
+    gen_num_seqs_cfg = cfg.get("gen_num_seqs", 1000)
+    gen_seq_lens_cfg = cfg.get("gen_seq_lens", 350)
     gen_max_iter = cfg.get("gen_max_iter", 10)
     gen_batch_size = cfg.get("gen_batch_size", 256)
     gen_sampling_strategy = cfg.get("gen_sampling_strategy", "gumbel_argmax")
@@ -229,10 +252,23 @@ def main(cfg: DictConfig):
         str(enzyme_explorer_checkpoint_dir), datadir
     )
 
-    num_seqs, seq_lens = _build_generation_plan_from_template(
-        enzyme_explorer_template_seqs,
-        str(gen_sequence_column_name),
-    )
+    if gen_use_template:
+        num_seqs, seq_lens = _build_generation_plan_from_template(
+            enzyme_explorer_template_seqs,
+            str(gen_sequence_column_name),
+        )
+    else:
+        num_seqs = _parse_int_list(gen_num_seqs_cfg, "gen_num_seqs")
+        seq_lens = _parse_int_list(gen_seq_lens_cfg, "gen_seq_lens")
+        if len(num_seqs) == 1 and len(seq_lens) > 1:
+            num_seqs = [num_seqs[0] for _ in seq_lens]
+        elif len(seq_lens) == 1 and len(num_seqs) > 1:
+            seq_lens = [seq_lens[0] for _ in num_seqs]
+        elif len(num_seqs) != len(seq_lens):
+            raise ValueError(
+                "gen_num_seqs and gen_seq_lens must have the same number of "
+                "items, or one of them must contain exactly one item"
+            )
     
     print(f"Loading model from checkpoint: {checkpoint_path}")
     model = load_model_from_checkpoint(str(checkpoint_path), cfg)
@@ -245,10 +281,16 @@ def main(cfg: DictConfig):
     )
     
     # Generate sequences
-    print(
-        f"Generating {len(num_seqs)} sequences from template lengths in: "
-        f"{enzyme_explorer_template_seqs}"
-    )
+    if gen_use_template:
+        print(
+            f"Generating {len(num_seqs)} sequences from template lengths in: "
+            f"{enzyme_explorer_template_seqs}"
+        )
+    else:
+        print(
+            "Generating fixed plan with "
+            f"num_seqs={num_seqs}, seq_lens={seq_lens}"
+        )
     gen_output_dir = logs_dir / "generated_sequences"
     gen_output_dir.mkdir(parents=True, exist_ok=True)
     
