@@ -1,0 +1,268 @@
+#!/usr/bin/env python
+"""
+Evaluate a trained checkpoint by generating sequences and validating with EnzymeExplorer.
+
+Usage:
+    python evaluate_checkpoint.py checkpoint_path=path/to/ckpt.ckpt
+"""
+
+import os
+from copy import deepcopy
+from pathlib import Path
+from types import SimpleNamespace
+from time import time
+from uuid import uuid4
+from shutil import rmtree
+import pickle
+
+import hydra
+from omegaconf import OmegaConf, DictConfig
+import pytorch_lightning as pl
+import torch
+
+from byprot.utils.generation import generate
+from enzymeexplorer.src.screening.tps_predict_fasta import (
+    get_embedding_extractor,
+    predict_tps,
+)
+from enzymeexplorer.src.screening.gather_detections_to_csv import (
+    main as enzymeexplorer_gather_detections_to_csv,
+)
+
+
+def load_model_from_checkpoint(checkpoint_path: str, cfg: DictConfig):
+    """Load a trained model from checkpoint."""
+    checkpoint_path = Path(checkpoint_path)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+    # Instantiate the configured task/model stack and restore checkpoint weights.
+    from byprot import utils as byprot_utils
+
+    task_cfg = OmegaConf.create(OmegaConf.to_container(cfg.task, resolve=True))
+    model_cfg = OmegaConf.create(OmegaConf.to_container(cfg.model, resolve=True))
+    model = byprot_utils.instantiate_from_config(
+        cfg=task_cfg,
+        group="task",
+        model=model_cfg,
+    )
+
+    checkpoint = torch.load(str(checkpoint_path), map_location="cpu")
+    state_dict = checkpoint.get("state_dict", checkpoint)
+    model.load_state_dict(state_dict, strict=False)
+    model.eval()
+
+    return model
+
+
+def _resolve_under_datadir(path_value: str, datadir: Path) -> Path:
+    """Resolve possibly-relative path under datadir without double-prefixing.
+
+    Handles legacy values like "dplm/foo" by stripping the leading datadir
+    basename before joining.
+    """
+    path_obj = Path(path_value)
+    if path_obj.is_absolute():
+        return path_obj
+
+    parts = path_obj.parts
+    if parts and parts[0] == datadir.name:
+        path_obj = Path(*parts[1:]) if len(parts) > 1 else Path(".")
+
+    return datadir / path_obj
+
+
+def validate_with_enzyme_explorer(
+    input_fasta_path: str,
+    output_csv_path: str,
+    enzymeexplorer_checkpoint_dir: str,
+    enzymeexplorer_max_len: int = 1022,
+    detection_threshold: float = 0.0,
+    detect_precursor_synthases: bool = True,
+    enzymeexplorer_model: str = "esm-1v-finetuned-subseq",
+):
+    """Validate generated sequences with EnzymeExplorer."""
+    enzymeexplorer_checkpoint_dir = Path(enzymeexplorer_checkpoint_dir)
+    enzymeexplorer_plm_checkpoint_dir = (
+        enzymeexplorer_checkpoint_dir / "plm_checkpoints"
+    )
+    if not enzymeexplorer_plm_checkpoint_dir.exists():
+        enzymeexplorer_plm_checkpoint_dir.mkdir(parents=True)
+    
+    # Prepare PlM checkpoint
+    assert enzymeexplorer_model in {
+        "esm-1v",
+        "esm-1v-finetuned-subseq",
+        "ankh_tps",
+        "ankh_base",
+    }, f"Model {enzymeexplorer_model} is not supported."
+    
+    plm_filename = (
+        "checkpoint-tps-esm1v-t33-subseq.ckpt"
+        if enzymeexplorer_model == "esm-1v-finetuned-subseq"
+        else "tps_ankh_lr=5e-05_bs=32.pth"
+    )
+    plm_path = enzymeexplorer_plm_checkpoint_dir / plm_filename
+    if not plm_path.exists():
+        print("Downloading TPS language model checkpoint..")
+        import gdown
+        url = "https://drive.google.com/uc?id=1jU76oUl0-CmiB9m3XhaKmI2HorFhyxC7"
+        gdown.download(url, str(plm_path), quiet=False)
+    
+    clf_chkpt_path = (
+        enzymeexplorer_checkpoint_dir / "classifier_plm_checkpoints.pkl"
+    )
+    if not clf_chkpt_path.exists():
+        print("Downloading classifier checkpoints..")
+        import gdown
+        url = "https://drive.google.com/uc?id=15_OFrrVUy9r9Urj-R2CjTRj_DHcazdAl"
+        gdown.download(url, str(clf_chkpt_path), quiet=False)
+    
+    # Prepare embeddings and classifiers
+    args = SimpleNamespace()
+    args.model = enzymeexplorer_model
+    args.plm_checkpoint_dir = str(enzymeexplorer_plm_checkpoint_dir)
+    args.max_len = enzymeexplorer_max_len
+    compute_embeddings_partial = get_embedding_extractor(args)
+    
+    with open(clf_chkpt_path, "rb") as file:
+        all_classifiers = pickle.load(file)
+    
+    # Run TPS prediction
+    run_id = f"{int(time() * 1000)}-{uuid4()}"
+    intermediate_outputs_root = f"_temp_dir_{run_id}"
+    if not Path(intermediate_outputs_root).exists():
+        Path(intermediate_outputs_root).mkdir(parents=True)
+    
+    try:
+        args = SimpleNamespace()
+        args.batch_size = 4
+        args.clf_batch_size = 4096
+        args.max_len = enzymeexplorer_max_len
+        args.fasta_path = input_fasta_path
+        args.starting_i = 0
+        args.end_i = 700_000
+        args.output_id = ""
+        args.verbose = False
+        args.output_root = intermediate_outputs_root
+        args.detection_threshold = detection_threshold
+        args.detect_precursor_synthases = detect_precursor_synthases
+        args.gpu = "0"
+        predict_tps(args, compute_embeddings_partial, all_classifiers)
+        
+        args = SimpleNamespace()
+        args.delete_individual_files = False
+        args.screening_results_root = f"{intermediate_outputs_root}/detections_plm"
+        args.output_path = output_csv_path
+        enzymeexplorer_gather_detections_to_csv(args)
+    finally:
+        rmtree(intermediate_outputs_root, ignore_errors=True)
+
+
+@hydra.main(version_base=None, config_path="configs", config_name="config")
+def main(cfg: DictConfig):
+    """Main evaluation function."""
+    # Parse arguments
+    checkpoint_path = cfg.get("checkpoint_path", None)
+    eval_name = cfg.get("eval_name", "checkpoint_eval")
+    datadir = cfg.get("datadir", None)
+    
+    if checkpoint_path is None:
+        raise ValueError("checkpoint_path must be specified")
+    if datadir is None:
+        raise ValueError("datadir must be specified")
+    
+    # Make paths absolute if relative
+    checkpoint_path = Path(checkpoint_path)
+    if not checkpoint_path.is_absolute():
+        checkpoint_path = Path(datadir) / checkpoint_path
+    
+    datadir = Path(datadir)
+    logs_dir = datadir / "logs" / eval_name
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generation parameters
+    gen_num_seqs = cfg.get("gen_num_seqs", 10)
+    gen_seq_lens = cfg.get("gen_seq_lens", 330)
+    gen_max_iter = cfg.get("gen_max_iter", 500)
+    gen_batch_size = cfg.get("gen_batch_size", 32)
+    gen_sampling_strategy = cfg.get("gen_sampling_strategy", "gumbel_argmax")
+    gen_temperature = cfg.get("gen_temperature", 1.0)
+    
+    # EnzymeExplorer parameters
+    enzyme_explorer_template_seqs = cfg.get(
+        "enzyme_explorer_template_seqs", "dplm/tps_scaffolds.csv"
+    )
+    enzyme_explorer_checkpoint_dir = cfg.get(
+        "enzyme_explorer_checkpoint_dir", "dplm/enzymeexplorer_checkpoints"
+    )
+    enzyme_explorer_detection_threshold = cfg.get(
+        "enzyme_explorer_detection_threshold", 0.0
+    )
+    enzyme_explorer_detect_precursor_synthases = cfg.get(
+        "enzyme_explorer_detect_precursor_synthases", True
+    )
+    
+    # Make enzyme explorer paths absolute (without datadir double-prefixing).
+    enzyme_explorer_template_seqs = _resolve_under_datadir(
+        str(enzyme_explorer_template_seqs), datadir
+    )
+    enzyme_explorer_checkpoint_dir = _resolve_under_datadir(
+        str(enzyme_explorer_checkpoint_dir), datadir
+    )
+    
+    print(f"Loading model from checkpoint: {checkpoint_path}")
+    model = load_model_from_checkpoint(str(checkpoint_path), cfg)
+    
+    # Get tokenizer
+    tokenizer = (
+        model.model.net.tokenizer
+        if hasattr(model.model, "net")
+        else model.model.decoder.net.tokenizer
+    )
+    
+    # Generate sequences
+    print(f"Generating {gen_num_seqs} sequences with length {gen_seq_lens}...")
+    gen_output_dir = logs_dir / "generated_sequences"
+    gen_output_dir.mkdir(parents=True, exist_ok=True)
+    
+    args = SimpleNamespace()
+    args.seed = None
+    args.architecture = type(model.model).__name__
+    args.num_seqs = [gen_num_seqs]
+    args.seq_lens = [int(gen_seq_lens)]
+    args.class_ids = None
+    args.saveto = str(gen_output_dir)
+    args.temperature = float(gen_temperature)
+    args.sampling_strategy = gen_sampling_strategy
+    args.max_iter = int(gen_max_iter)
+    args.batch_lens_together = True
+    args.batch_size = int(gen_batch_size)
+    args.cond_seq = None
+    args.cache_dir = None
+    
+    fasta_path = generate(args, model.model, tokenizer, verbose=True)
+    print(f"Generated sequences saved to: {fasta_path}")
+    
+    # Evaluate with EnzymeExplorer
+    print("Evaluating generated sequences with EnzymeExplorer...")
+    output_csv_path = fasta_path.replace(
+        ".fasta", "_enzyme_explorer_sequence_only.csv"
+    )
+    
+    validate_with_enzyme_explorer(
+        input_fasta_path=fasta_path,
+        output_csv_path=output_csv_path,
+        enzymeexplorer_checkpoint_dir=str(enzyme_explorer_checkpoint_dir),
+        detection_threshold=float(enzyme_explorer_detection_threshold),
+        detect_precursor_synthases=bool(
+            enzyme_explorer_detect_precursor_synthases
+        ),
+    )
+    
+    print(f"Evaluation results saved to: {output_csv_path}")
+    print("Checkpoint evaluation complete!")
+
+
+if __name__ == "__main__":
+    main()
