@@ -92,13 +92,20 @@ sanitize_name_component() {
 
 derive_eval_name_from_checkpoint() {
     local checkpoint_path="$1"
+    local run_name=""
     local checkpoint_name
 
     checkpoint_name="$(basename "$checkpoint_path")"
     checkpoint_name="${checkpoint_name%.ckpt}"
+
+    if [[ "$checkpoint_path" =~ /logs/([^/]+)/checkpoints/ ]]; then
+        run_name="${BASH_REMATCH[1]}"
+    fi
+
+    run_name="$(sanitize_name_component "$run_name")"
     checkpoint_name="$(sanitize_name_component "$checkpoint_name")"
 
-    printf 'checkpoint_eval_%s' "$checkpoint_name"
+    printf 'checkpoint_eval_%s_%s' "$run_name" "$checkpoint_name"
 }
 
 derive_seqlen_suffix() {
