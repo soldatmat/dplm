@@ -45,12 +45,14 @@ GEN_NUM_SEQS="${GEN_NUM_SEQS:-10}"
 GEN_SEQ_LENS="${GEN_SEQ_LENS:-330}"
 GEN_USE_TEMPLATE="${GEN_USE_TEMPLATE:-true}"
 GEN_SEQUENCE_COLUMN_NAME="${GEN_SEQUENCE_COLUMN_NAME:-Aminoacid_sequence}"
+GEN_TEMPLATE_LENGTH_COLUMN_NAME="${GEN_TEMPLATE_LENGTH_COLUMN_NAME:-length}"
+GEN_TEMPLATE_COUNT_COLUMN_NAME="${GEN_TEMPLATE_COUNT_COLUMN_NAME:-count}"
 GEN_MAX_ITER="${GEN_MAX_ITER:-10}"
 GEN_BATCH_SIZE="${GEN_BATCH_SIZE:-256}"
 GEN_SAMPLING_STRATEGY="${GEN_SAMPLING_STRATEGY:-gumbel_argmax}"
 GEN_TEMPERATURE="${GEN_TEMPERATURE:-1.0}"
 
-ENZYME_EXPLORER_TEMPLATE_SEQS="${ENZYME_EXPLORER_TEMPLATE_SEQS:-dplm/data-bin/MARTS-DB/2025-11-19/TPS_sequences.csv}"
+ENZYME_EXPLORER_TEMPLATE_SEQS="${ENZYME_EXPLORER_TEMPLATE_SEQS:-/mnt/proj2/fta-26-15/documents/output/dplm/sampled_lengths_1000.csv}"
 ENZYME_EXPLORER_CHECKPOINT_DIR="${ENZYME_EXPLORER_CHECKPOINT_DIR:-data-bin/checkpoints/enzymeexplorer}"
 ENZYME_EXPLORER_DETECTION_THRESHOLD="${ENZYME_EXPLORER_DETECTION_THRESHOLD:-0.0}"
 ENZYME_EXPLORER_DETECT_PRECURSOR_SYNTHASES="${ENZYME_EXPLORER_DETECT_PRECURSOR_SYNTHASES:-true}"
@@ -120,6 +122,17 @@ derive_seqlen_suffix() {
     printf 'seqlen%s' "$first_len"
 }
 
+derive_template_suffix() {
+    local template_path="$1"
+    local template_name
+
+    template_name="$(basename "$template_path")"
+    template_name="${template_name%.csv}"
+    template_name="$(sanitize_name_component "$template_name")"
+
+    printf 'tpl%s' "$template_name"
+}
+
 # Normalize path-like inputs so the script is robust regardless of caller CWD.
 DATADIR="$(cd "$DATADIR" && pwd)"
 CHECKPOINT="$(resolve_path_under_datadir "$CHECKPOINT")"
@@ -130,6 +143,9 @@ if [[ -z "$EVAL_NAME" ]]; then
     case "${GEN_USE_TEMPLATE,,}" in
         false|0|no)
             EVAL_NAME+="_$(derive_seqlen_suffix "$GEN_SEQ_LENS")"
+            ;;
+        *)
+            EVAL_NAME+="_$(derive_template_suffix "$ENZYME_EXPLORER_TEMPLATE_SEQS")"
             ;;
     esac
 fi
@@ -235,6 +251,8 @@ python evaluate_checkpoint.py --config-path ../configs \
     +gen_num_seqs="${GEN_NUM_SEQS}" \
     +gen_seq_lens="${GEN_SEQ_LENS}" \
     +gen_sequence_column_name='"${GEN_SEQUENCE_COLUMN_NAME}"' \
+    +gen_template_length_column_name='"${GEN_TEMPLATE_LENGTH_COLUMN_NAME}"' \
+    +gen_template_count_column_name='"${GEN_TEMPLATE_COUNT_COLUMN_NAME}"' \
     +gen_max_iter="${GEN_MAX_ITER}" \
     +gen_batch_size="${GEN_BATCH_SIZE}" \
     +gen_sampling_strategy="${GEN_SAMPLING_STRATEGY}" \
@@ -315,6 +333,8 @@ conda run "\${CONDA_RUN_ARGS[@]}" python evaluate_checkpoint.py --config-path ..
     +gen_num_seqs="${GEN_NUM_SEQS}" \
     +gen_seq_lens="${GEN_SEQ_LENS}" \
     +gen_sequence_column_name='"${GEN_SEQUENCE_COLUMN_NAME}"' \
+    +gen_template_length_column_name='"${GEN_TEMPLATE_LENGTH_COLUMN_NAME}"' \
+    +gen_template_count_column_name='"${GEN_TEMPLATE_COUNT_COLUMN_NAME}"' \
     +gen_max_iter="${GEN_MAX_ITER}" \
     +gen_batch_size="${GEN_BATCH_SIZE}" \
     +gen_sampling_strategy="${GEN_SAMPLING_STRATEGY}" \

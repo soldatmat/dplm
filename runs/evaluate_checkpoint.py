@@ -76,19 +76,36 @@ def _resolve_under_datadir(path_value: str, datadir: Path) -> Path:
 def _build_generation_plan_from_template(
     template_sequences_file: Path,
     sequence_column_name: str,
+    length_column_name: str,
+    count_column_name: str,
 ):
     data = pd.read_csv(template_sequences_file)
-    if sequence_column_name not in data.columns:
-        raise ValueError(
-            f"Column '{sequence_column_name}' not found in template file: {template_sequences_file}"
-        )
+    if sequence_column_name in data.columns:
+        seq_lens = data[sequence_column_name].astype(str).apply(len).tolist()
+        if not seq_lens:
+            raise ValueError(f"No sequences found in template file: {template_sequences_file}")
+        num_seqs = [1 for _ in seq_lens]
+        return num_seqs, seq_lens, "sequence"
 
-    seq_lens = data[sequence_column_name].apply(len).tolist()
-    if not seq_lens:
-        raise ValueError(f"No sequences found in template file: {template_sequences_file}")
+    if length_column_name in data.columns and count_column_name in data.columns:
+        seq_lens = data[length_column_name].tolist()
+        num_seqs = data[count_column_name].tolist()
+        if not seq_lens:
+            raise ValueError(f"No rows found in template file: {template_sequences_file}")
 
-    num_seqs = [1 for _ in seq_lens]
-    return num_seqs, seq_lens
+        seq_lens = [int(v) for v in seq_lens]
+        num_seqs = [int(v) for v in num_seqs]
+        if any(v <= 0 for v in seq_lens):
+            raise ValueError("All sequence lengths in template must be positive")
+        if any(v <= 0 for v in num_seqs):
+            raise ValueError("All sequence counts in template must be positive")
+        return num_seqs, seq_lens, "length_count"
+
+    raise ValueError(
+        "Template format not recognized. Expected either sequence column "
+        f"'{sequence_column_name}' or tuple columns '{length_column_name}' and "
+        f"'{count_column_name}' in: {template_sequences_file}"
+    )
 
 
 def _parse_int_list(value, field_name: str):
@@ -223,6 +240,8 @@ def main(cfg: DictConfig):
             "on",
         }
     gen_sequence_column_name = cfg.get("gen_sequence_column_name", "Aminoacid_sequence")
+    gen_template_length_column_name = cfg.get("gen_template_length_column_name", "length")
+    gen_template_count_column_name = cfg.get("gen_template_count_column_name", "count")
     gen_num_seqs_cfg = cfg.get("gen_num_seqs", 1000)
     gen_seq_lens_cfg = cfg.get("gen_seq_lens", 350)
     gen_max_iter = cfg.get("gen_max_iter", 10)
@@ -253,11 +272,14 @@ def main(cfg: DictConfig):
     )
 
     if gen_use_template:
-        num_seqs, seq_lens = _build_generation_plan_from_template(
+        num_seqs, seq_lens, template_mode = _build_generation_plan_from_template(
             enzyme_explorer_template_seqs,
             str(gen_sequence_column_name),
+            str(gen_template_length_column_name),
+            str(gen_template_count_column_name),
         )
     else:
+        template_mode = "manual"
         num_seqs = _parse_int_list(gen_num_seqs_cfg, "gen_num_seqs")
         seq_lens = _parse_int_list(gen_seq_lens_cfg, "gen_seq_lens")
         if len(num_seqs) == 1 and len(seq_lens) > 1:
@@ -282,10 +304,16 @@ def main(cfg: DictConfig):
     
     # Generate sequences
     if gen_use_template:
-        print(
-            f"Generating {len(num_seqs)} sequences from template lengths in: "
-            f"{enzyme_explorer_template_seqs}"
-        )
+        if template_mode == "sequence":
+            print(
+                f"Generating {len(num_seqs)} sequences from sequence template in: "
+                f"{enzyme_explorer_template_seqs}"
+            )
+        else:
+            print(
+                "Generating from length/count template with "
+                f"{len(num_seqs)} length buckets in: {enzyme_explorer_template_seqs}"
+            )
     else:
         print(
             "Generating fixed plan with "
