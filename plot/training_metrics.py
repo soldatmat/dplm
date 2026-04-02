@@ -6,6 +6,7 @@ import textwrap
 from pathlib import Path
 from typing import Iterable
 
+import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
@@ -182,6 +183,88 @@ def _make_compact_tick_formatter(max_abs_value: float) -> FuncFormatter:
         return f"{text}{suffix}"
 
     return FuncFormatter(_fmt)
+
+
+def find_shared_pngs(runs: list[str | dict[str, str]], plot_subdir: str) -> list[Path]:
+    normalized_runs = normalize_runs(runs)
+    per_run_relative_paths: list[set[Path]] = []
+
+    for run in normalized_runs:
+        plot_root = Path(run["path"]) / plot_subdir
+        if not plot_root.exists():
+            raise FileNotFoundError(f"Plot directory not found: {plot_root}")
+
+        relative_paths = {
+            path.relative_to(plot_root) for path in plot_root.rglob("*.png")
+        }
+        per_run_relative_paths.append(relative_paths)
+
+    if not per_run_relative_paths:
+        return []
+
+    shared_relative_paths = set(per_run_relative_paths[0])
+    for paths in per_run_relative_paths[1:]:
+        shared_relative_paths &= paths
+
+    return sorted(shared_relative_paths)
+
+
+def plot_png_comparison(
+    runs: list[str | dict[str, str]],
+    plot_subdir: str,
+    relative_png_path: str | Path,
+    ncols: int = 3,
+    height_per_row: float = 4.6,
+    width_per_col: float = 6.4,
+    max_title_length: int = 60,
+    title_wrap_width: int = 26,
+    title_max_lines: int = 2,
+    wspace: float = 0.28,
+    hspace: float = 0.62,
+) -> plt.Figure:
+    normalized_runs = normalize_runs(runs)
+    relative_png_path = Path(relative_png_path)
+
+    n_runs = len(normalized_runs)
+    nrows = (n_runs + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(ncols * width_per_col, nrows * height_per_row),
+        squeeze=False,
+        constrained_layout=False,
+    )
+    flat_axes = axes.flatten()
+
+    for index, run in enumerate(normalized_runs):
+        ax = flat_axes[index]
+        label = str(run["label"])
+        image_path = Path(run["path"]) / plot_subdir / relative_png_path
+        if not image_path.exists():
+            raise FileNotFoundError(f"Image file not found: {image_path}")
+
+        image = mpimg.imread(image_path)
+        ax.imshow(image)
+        ax.axis("off")
+        ax.set_title(
+            _format_subplot_title(
+                label,
+                max_total_chars=max_title_length,
+                wrap_width=title_wrap_width,
+                max_lines=title_max_lines,
+            ),
+            fontsize=10,
+            linespacing=1.2,
+            pad=8,
+        )
+
+    for index in range(n_runs, len(flat_axes)):
+        flat_axes[index].axis("off")
+
+    fig.suptitle(relative_png_path.as_posix(), fontsize=14)
+    fig.subplots_adjust(top=0.86, wspace=wspace, hspace=hspace)
+    return fig
 
 
 def plot_metric_comparison(
