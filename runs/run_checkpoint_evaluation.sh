@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Generate and evaluate sequences from a trained checkpoint using EnzymeExplorer.
 #
 # Syntax:
-#   [VAR=value ...] bash runs/dplm/run_checkpoint_evaluation.sh
+#   [VAR=value ...] bash runs/run_checkpoint_evaluation.sh
 #
 # Examples:
-#   DRY_RUN=1 bash runs/dplm/run_checkpoint_evaluation.sh
-#   CLUSTER=karolina CHECKPOINT=path/to/checkpoint.ckpt DRY_RUN=1 bash runs/dplm/run_checkpoint_evaluation.sh
-#   CLUSTER=karolina CHECKPOINT=path/to/checkpoint.ckpt bash runs/dplm/run_checkpoint_evaluation.sh
+#   DRY_RUN=1 bash runs/run_checkpoint_evaluation.sh
+#   CLUSTER=karolina CHECKPOINT=path/to/checkpoint.ckpt DRY_RUN=1 bash runs/run_checkpoint_evaluation.sh
+#   CLUSTER=karolina CHECKPOINT=path/to/checkpoint.ckpt bash runs/run_checkpoint_evaluation.sh
 #
 # Common overrides: DATADIR, CHECKPOINT, CLUSTER, SCHEDULER_TYPE, SCHEDULER_RESOURCE_SPEC, JOB_*, GEN_*, METACENTRUM_MAMBA_ENV, KAROLINA_CONDA_ENV.
 
@@ -17,8 +20,8 @@ set -euo pipefail
 # User-Configurable Variables
 # -------------------------
 
-DATADIR="${DATADIR:-/storage/brno2/home/soldatmat/documents/terpene_synthases/dplm}"
-CHECKPOINT="${CHECKPOINT:-dplm/logs/TPS_dplm_150m_stage3_run_8/checkpoints/N-Step-Checkpoint_epoch=172_step=20000.ckpt}"
+DATADIR="${DATADIR:-$REPO_ROOT}"
+CHECKPOINT="${CHECKPOINT:-logs/TPS_dplm_150m_stage3_run_8/checkpoints/N-Step-Checkpoint_epoch=172_step=20000.ckpt}"
 EVAL_NAME="${EVAL_NAME:-checkpoint_eval}"
 EVAL_EXPERIMENT="${EVAL_EXPERIMENT:-tps/TPS_dplm_150m_stage3}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -46,7 +49,7 @@ GEN_SAMPLING_STRATEGY="${GEN_SAMPLING_STRATEGY:-gumbel_argmax}"
 GEN_TEMPERATURE="${GEN_TEMPERATURE:-1.0}"
 
 ENZYME_EXPLORER_TEMPLATE_SEQS="${ENZYME_EXPLORER_TEMPLATE_SEQS:-tps_scaffolds.csv}"
-ENZYME_EXPLORER_CHECKPOINT_DIR="${ENZYME_EXPLORER_CHECKPOINT_DIR:-enzymeexplorer_checkpoints}"
+ENZYME_EXPLORER_CHECKPOINT_DIR="${ENZYME_EXPLORER_CHECKPOINT_DIR:-data-bin/checkpoints/enzymeexplorer}"
 ENZYME_EXPLORER_DETECTION_THRESHOLD="${ENZYME_EXPLORER_DETECTION_THRESHOLD:-0.0}"
 ENZYME_EXPLORER_DETECT_PRECURSOR_SYNTHASES="${ENZYME_EXPLORER_DETECT_PRECURSOR_SYNTHASES:-true}"
 
@@ -54,6 +57,30 @@ METACENTRUM_MAMBA_ENV="${METACENTRUM_MAMBA_ENV:-/storage/brno2/home/soldatmat/.c
 KAROLINA_CONDA_ENV="${KAROLINA_CONDA_ENV:-dplm}"
 
 DEFAULT_RESOURCE_SPEC=""
+
+resolve_path_under_datadir() {
+    local path_value="$1"
+    local datadir_basename
+    datadir_basename="$(basename "$DATADIR")"
+
+    if [[ "$path_value" == /* ]]; then
+        printf '%s' "$path_value"
+        return
+    fi
+
+    path_value="${path_value#./}"
+    if [[ "$path_value" == "$datadir_basename/"* ]]; then
+        path_value="${path_value#"$datadir_basename/"}"
+    fi
+
+    printf '%s/%s' "$DATADIR" "$path_value"
+}
+
+# Normalize path-like inputs so the script is robust regardless of caller CWD.
+DATADIR="$(cd "$DATADIR" && pwd)"
+CHECKPOINT="$(resolve_path_under_datadir "$CHECKPOINT")"
+ENZYME_EXPLORER_TEMPLATE_SEQS="$(resolve_path_under_datadir "$ENZYME_EXPLORER_TEMPLATE_SEQS")"
+ENZYME_EXPLORER_CHECKPOINT_DIR="$(resolve_path_under_datadir "$ENZYME_EXPLORER_CHECKPOINT_DIR")"
 
 # -------------------------
 # Internal Setup And Validation
