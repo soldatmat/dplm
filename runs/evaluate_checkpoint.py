@@ -121,6 +121,31 @@ def _parse_int_list(value, field_name: str):
     raise TypeError(f"Unsupported type for {field_name}: {type(value)}")
 
 
+def _parse_bool(value, field_name: str):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if value in {0, 1}:
+            return bool(value)
+        raise ValueError(
+            f"Invalid integer boolean value for {field_name}: {value!r}. "
+            "Expected 0 or 1"
+        )
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true"}:
+            return True
+        if normalized in {"0", "false"}:
+            return False
+        raise ValueError(
+            f"Invalid boolean value for {field_name}: {value!r}. "
+            "Expected one of: true/false/1/0"
+        )
+    raise TypeError(
+        f"Unsupported type for {field_name}: {type(value)}"
+    )
+
+
 def validate_with_enzyme_explorer(
     input_fasta_path: str,
     output_csv_path: str,
@@ -246,21 +271,20 @@ def main(cfg: DictConfig):
     logs_dir.mkdir(parents=True, exist_ok=True)
     
     # Generation parameters
-    gen_use_template = cfg.get("gen_use_template", True)
-    if isinstance(gen_use_template, str):
-        gen_use_template = gen_use_template.strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+    gen_use_template = _parse_bool(
+        cfg.get("gen_use_template", True), "gen_use_template"
+    )
     gen_sequence_column_name = cfg.get("gen_sequence_column_name", "Aminoacid_sequence")
     gen_template_length_column_name = cfg.get("gen_template_length_column_name", "length")
     gen_template_count_column_name = cfg.get("gen_template_count_column_name", "count")
     gen_num_seqs_cfg = cfg.get("gen_num_seqs", 1000)
     gen_seq_lens_cfg = cfg.get("gen_seq_lens", 350)
-    gen_max_iter = cfg.get("gen_max_iter", 10)
+    gen_max_iter = cfg.get("gen_max_iter", 500)
     gen_batch_size = cfg.get("gen_batch_size", 256)
+    gen_batch_lens_together = _parse_bool(
+        cfg.get("gen_batch_lens_together", True),
+        "gen_batch_lens_together",
+    )
     gen_sampling_strategy = cfg.get("gen_sampling_strategy", "gumbel_argmax")
     gen_temperature = cfg.get("gen_temperature", 1.0)
     
@@ -274,8 +298,9 @@ def main(cfg: DictConfig):
     enzyme_explorer_detection_threshold = cfg.get(
         "enzyme_explorer_detection_threshold", 0.0
     )
-    enzyme_explorer_detect_precursor_synthases = cfg.get(
-        "enzyme_explorer_detect_precursor_synthases", True
+    enzyme_explorer_detect_precursor_synthases = _parse_bool(
+        cfg.get("enzyme_explorer_detect_precursor_synthases", True),
+        "enzyme_explorer_detect_precursor_synthases",
     )
     
     # Make enzyme explorer paths absolute (without datadir double-prefixing).
@@ -349,7 +374,7 @@ def main(cfg: DictConfig):
         args.temperature = float(gen_temperature)
         args.sampling_strategy = gen_sampling_strategy
         args.max_iter = int(gen_max_iter)
-        args.batch_lens_together = True
+        args.batch_lens_together = bool(gen_batch_lens_together)
         args.batch_size = int(gen_batch_size)
         args.cond_seq = None
         args.cache_dir = None
@@ -371,9 +396,7 @@ def main(cfg: DictConfig):
         output_csv_path=output_csv_path,
         enzymeexplorer_checkpoint_dir=str(enzyme_explorer_checkpoint_dir),
         detection_threshold=float(enzyme_explorer_detection_threshold),
-        detect_precursor_synthases=bool(
-            enzyme_explorer_detect_precursor_synthases
-        ),
+        detect_precursor_synthases=enzyme_explorer_detect_precursor_synthases,
     )
     
     print(f"Evaluation results saved to: {output_csv_path}")

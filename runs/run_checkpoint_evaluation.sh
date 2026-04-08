@@ -49,8 +49,9 @@ GEN_USE_TEMPLATE="${GEN_USE_TEMPLATE:-true}"
 GEN_SEQUENCE_COLUMN_NAME="${GEN_SEQUENCE_COLUMN_NAME:-Aminoacid_sequence}"
 GEN_TEMPLATE_LENGTH_COLUMN_NAME="${GEN_TEMPLATE_LENGTH_COLUMN_NAME:-length}"
 GEN_TEMPLATE_COUNT_COLUMN_NAME="${GEN_TEMPLATE_COUNT_COLUMN_NAME:-count}"
-GEN_MAX_ITER="${GEN_MAX_ITER:-10}"
+GEN_MAX_ITER="${GEN_MAX_ITER:-500}"
 GEN_BATCH_SIZE="${GEN_BATCH_SIZE:-256}"
+GEN_BATCH_LENS_TOGETHER="${GEN_BATCH_LENS_TOGETHER:-true}"
 GEN_SAMPLING_STRATEGY="${GEN_SAMPLING_STRATEGY:-gumbel_argmax}"
 GEN_TEMPERATURE="${GEN_TEMPERATURE:-1.0}"
 
@@ -293,6 +294,7 @@ python evaluate_checkpoint.py --config-path ../configs \
     +gen_template_count_column_name='"${GEN_TEMPLATE_COUNT_COLUMN_NAME}"' \
     +gen_max_iter="${GEN_MAX_ITER}" \
     +gen_batch_size="${GEN_BATCH_SIZE}" \
+    +gen_batch_lens_together="${GEN_BATCH_LENS_TOGETHER}" \
     +gen_sampling_strategy="${GEN_SAMPLING_STRATEGY}" \
     +gen_temperature="${GEN_TEMPERATURE}" \
     +enzyme_explorer_template_seqs="${ENZYME_EXPLORER_TEMPLATE_SEQS}" \
@@ -377,6 +379,7 @@ conda run "\${CONDA_RUN_ARGS[@]}" python evaluate_checkpoint.py --config-path ..
     +gen_template_count_column_name='"${GEN_TEMPLATE_COUNT_COLUMN_NAME}"' \
     +gen_max_iter="${GEN_MAX_ITER}" \
     +gen_batch_size="${GEN_BATCH_SIZE}" \
+    +gen_batch_lens_together="${GEN_BATCH_LENS_TOGETHER}" \
     +gen_sampling_strategy="${GEN_SAMPLING_STRATEGY}" \
     +gen_temperature="${GEN_TEMPERATURE}" \
     +enzyme_explorer_template_seqs="${ENZYME_EXPLORER_TEMPLATE_SEQS}" \

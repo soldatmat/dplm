@@ -378,6 +378,7 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         temperature: float = 1.0,
         saveto: str = "./dplm_generated",
         generation_batch_size: int = 32,
+        generation_batch_lens_together: bool = True,
         enzymeexplorer_detection_threshold: float = 0.0,
         enzymeexplorer_detect_precursor_synthases: bool = True,
         enzymeexplorer_model: str = "esm-1v-finetuned-subseq",
@@ -385,12 +386,46 @@ class ValidateWithEnzymeExplorer(pl.Callback):
     ):
         logger.info(f"template_sequences_file: {template_sequences_file}")
         data = pd.read_csv(template_sequences_file)
-        self.seq_lens = data[sequence_column_name].apply(len).tolist()
-        self.num_seqs = [1 for seq in self.seq_lens]
+        seq_lens_raw = data[sequence_column_name].apply(len).tolist()
         if class_id_column_name is not None:
-            self.class_ids = data[class_id_column_name].tolist()
+            class_ids_raw = data[class_id_column_name].tolist()
         else:
-            self.class_ids = None
+            class_ids_raw = None
+
+        if not isinstance(generation_batch_lens_together, bool):
+            raise TypeError(
+                "generation_batch_lens_together must be a boolean"
+            )
+        self.generation_batch_lens_together = generation_batch_lens_together
+        if self.generation_batch_lens_together:
+            self.seq_lens = seq_lens_raw
+            self.num_seqs = [1 for _ in self.seq_lens]
+            self.class_ids = class_ids_raw
+        else:
+            # In non-together mode, generate() iterates over length buckets and
+            # expects matching num_seqs counts for each bucket.
+            bucket_counts = {}
+            bucket_order = []
+            for i, seq_len in enumerate(seq_lens_raw):
+                class_id = class_ids_raw[i] if class_ids_raw is not None else None
+                key = (seq_len, class_id)
+                if key not in bucket_counts:
+                    bucket_counts[key] = 0
+                    bucket_order.append(key)
+                bucket_counts[key] += 1
+
+            self.seq_lens = [seq_len for seq_len, _ in bucket_order]
+            self.num_seqs = [bucket_counts[key] for key in bucket_order]
+            if class_ids_raw is not None:
+                self.class_ids = [class_id for _, class_id in bucket_order]
+            else:
+                self.class_ids = None
+
+        logger.info(
+            "ValidateWithEnzymeExplorer generation plan: batch_lens_together=%s, buckets=%d",
+            self.generation_batch_lens_together,
+            len(self.seq_lens),
+        )
 
         self.max_iter = max_iter
         self.sampling_strategy = sampling_strategy
@@ -494,7 +529,7 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         args.temperature = self.temperature
         args.sampling_strategy = self.sampling_strategy
         args.max_iter = self.max_iter
-        args.batch_lens_together = True
+        args.batch_lens_together = self.generation_batch_lens_together
         args.batch_size = self.generation_batch_size
         args.cond_seq = None # TODO add cond_seq support
         args.cache_dir = None
