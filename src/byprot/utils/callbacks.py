@@ -383,8 +383,7 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         enzymeexplorer_model: str = "esm-1v-finetuned-subseq",
         every_n_epochs: int = 1,
     ):
-        print("template_sequences_file:", template_sequences_file) # TODO delete
-        logger.info(f"template_sequences_file: {template_sequences_file}") # TODO delete
+        logger.info(f"template_sequences_file: {template_sequences_file}")
         data = pd.read_csv(template_sequences_file)
         self.seq_lens = data[sequence_column_name].apply(len).tolist()
         self.num_seqs = [1 for seq in self.seq_lens]
@@ -402,12 +401,10 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         self.enzymeexplorer_detection_threshold = enzymeexplorer_detection_threshold
         self.enzymeexplorer_detect_precursor_synthases = enzymeexplorer_detect_precursor_synthases
         self.enzymeexplorer_model = enzymeexplorer_model
-        print("enzymeexplorer_checkpoint_dir:", enzymeexplorer_checkpoint_dir) # TODO delete
-        logger.info(f"enzymeexplorer_checkpoint_dir: {enzymeexplorer_checkpoint_dir}") # TODO delete
+        logger.info(f"enzymeexplorer_checkpoint_dir: {enzymeexplorer_checkpoint_dir}")
         self.enzymeexplorer_checkpoint_dir = enzymeexplorer_checkpoint_dir
         self.enzymeexplorer_classifier_checkpoint_path = self._prepare_plm_checkpoint()
-        print("enzymeexplorer_classifier_checkpoint_path:", self.enzymeexplorer_classifier_checkpoint_path) # TODO delete
-        logger.info(f"enzymeexplorer_classifier_checkpoint_path: {self.enzymeexplorer_classifier_checkpoint_path}") # TODO delete
+        logger.info(f"enzymeexplorer_classifier_checkpoint_path: {self.enzymeexplorer_classifier_checkpoint_path}")
         self.enzymeexplorer_max_len = 1022
 
         self.every_n_epochs = every_n_epochs
@@ -421,8 +418,7 @@ class ValidateWithEnzymeExplorer(pl.Callback):
 
         with open(self.enzymeexplorer_classifier_checkpoint_path, "rb") as file:
             self.all_classifiers = pickle.load(file)
-        print("ValidateWithEnzymeExplorer init finished") # TODO delete
-        logger.info("ValidateWithEnzymeExplorer init finished") # TODO delete
+        logger.info("ValidateWithEnzymeExplorer init finished")
 
     def _prepare_plm_checkpoint(self):
         self.enzymeexplorer_plm_checkpoint_dir = Path(self.enzymeexplorer_checkpoint_dir) / "plm_checkpoints"
@@ -477,11 +473,10 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         rmtree(intermediate_outputs_root)
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        print("VALIDATE WITH ENZYME EXPLORER CALLBACK: on_validation_epoch_end called, trainer.current_epoch =", trainer.current_epoch) # TODO delete
         if (trainer.current_epoch + 1) % self.every_n_epochs == 0: # epochs are numbered from 0 in PyTorch Lightning
-            print("ValidateWithEnzymeExplorer after train epoch", trainer.current_epoch + 1)
+            logger.info(f"ValidateWithEnzymeExplorer after train epoch {trainer.current_epoch + 1}")
         elif trainer.sanity_checking:
-            print("ValidateWithEnzymeExplorer before training")
+            logger.info("ValidateWithEnzymeExplorer before training")
         else:
             return
 
@@ -507,5 +502,5 @@ class ValidateWithEnzymeExplorer(pl.Callback):
 
         # Evaluate generated sequences with EnzymeExplorer
         output_csv_path = fasta_path.replace(".fasta", "_enzyme_explorer_sequence_only.csv")
-        print("Validating generated sequences with EnzymeExplorer")
+        logger.info("Validating generated sequences with EnzymeExplorer")
         self._validate_with_enzymeexplorer(fasta_path, output_csv_path)
