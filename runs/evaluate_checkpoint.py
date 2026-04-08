@@ -213,20 +213,35 @@ def main(cfg: DictConfig):
     """Main evaluation function."""
     # Parse arguments
     checkpoint_path = cfg.get("checkpoint_path", None)
+    input_fasta_path = cfg.get("input_fasta_path", None)
     eval_name = cfg.get("eval_name", "checkpoint_eval")
     datadir = cfg.get("datadir", None)
-    
-    if checkpoint_path is None:
-        raise ValueError("checkpoint_path must be specified")
+
     if datadir is None:
         raise ValueError("datadir must be specified")
-    
-    # Make paths absolute if relative
-    checkpoint_path = Path(checkpoint_path)
-    if not checkpoint_path.is_absolute():
-        checkpoint_path = Path(datadir) / checkpoint_path
-    
+
     datadir = Path(datadir)
+
+    # Make optional input FASTA path absolute if relative.
+    if isinstance(input_fasta_path, str):
+        input_fasta_path = input_fasta_path.strip() or None
+    if input_fasta_path is not None:
+        input_fasta_path = _resolve_under_datadir(str(input_fasta_path), datadir)
+        if not input_fasta_path.exists():
+            raise FileNotFoundError(
+                f"Provided input_fasta_path does not exist: {input_fasta_path}"
+            )
+
+    # Checkpoint is only required when we need to generate new sequences.
+    if input_fasta_path is None:
+        if checkpoint_path is None:
+            raise ValueError(
+                "checkpoint_path must be specified when input_fasta_path is not provided"
+            )
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.is_absolute():
+            checkpoint_path = datadir / checkpoint_path
+
     logs_dir = datadir / "logs" / eval_name
     logs_dir.mkdir(parents=True, exist_ok=True)
     
@@ -271,74 +286,79 @@ def main(cfg: DictConfig):
         str(enzyme_explorer_checkpoint_dir), datadir
     )
 
-    if gen_use_template:
-        num_seqs, seq_lens, template_mode = _build_generation_plan_from_template(
-            enzyme_explorer_template_seqs,
-            str(gen_sequence_column_name),
-            str(gen_template_length_column_name),
-            str(gen_template_count_column_name),
-        )
-    else:
-        template_mode = "manual"
-        num_seqs = _parse_int_list(gen_num_seqs_cfg, "gen_num_seqs")
-        seq_lens = _parse_int_list(gen_seq_lens_cfg, "gen_seq_lens")
-        if len(num_seqs) == 1 and len(seq_lens) > 1:
-            num_seqs = [num_seqs[0] for _ in seq_lens]
-        elif len(seq_lens) == 1 and len(num_seqs) > 1:
-            seq_lens = [seq_lens[0] for _ in num_seqs]
-        elif len(num_seqs) != len(seq_lens):
-            raise ValueError(
-                "gen_num_seqs and gen_seq_lens must have the same number of "
-                "items, or one of them must contain exactly one item"
-            )
-    
-    print(f"Loading model from checkpoint: {checkpoint_path}")
-    model = load_model_from_checkpoint(str(checkpoint_path), cfg)
-    
-    # Get tokenizer
-    tokenizer = (
-        model.model.net.tokenizer
-        if hasattr(model.model, "net")
-        else model.model.decoder.net.tokenizer
-    )
-    
-    # Generate sequences
-    if gen_use_template:
-        if template_mode == "sequence":
-            print(
-                f"Generating {len(num_seqs)} sequences from sequence template in: "
-                f"{enzyme_explorer_template_seqs}"
+    if input_fasta_path is None:
+        if gen_use_template:
+            num_seqs, seq_lens, template_mode = _build_generation_plan_from_template(
+                enzyme_explorer_template_seqs,
+                str(gen_sequence_column_name),
+                str(gen_template_length_column_name),
+                str(gen_template_count_column_name),
             )
         else:
-            print(
-                "Generating from length/count template with "
-                f"{len(num_seqs)} length buckets in: {enzyme_explorer_template_seqs}"
-            )
-    else:
-        print(
-            "Generating fixed plan with "
-            f"num_seqs={num_seqs}, seq_lens={seq_lens}"
+            template_mode = "manual"
+            num_seqs = _parse_int_list(gen_num_seqs_cfg, "gen_num_seqs")
+            seq_lens = _parse_int_list(gen_seq_lens_cfg, "gen_seq_lens")
+            if len(num_seqs) == 1 and len(seq_lens) > 1:
+                num_seqs = [num_seqs[0] for _ in seq_lens]
+            elif len(seq_lens) == 1 and len(num_seqs) > 1:
+                seq_lens = [seq_lens[0] for _ in num_seqs]
+            elif len(num_seqs) != len(seq_lens):
+                raise ValueError(
+                    "gen_num_seqs and gen_seq_lens must have the same number of "
+                    "items, or one of them must contain exactly one item"
+                )
+    
+    if input_fasta_path is None:
+        print(f"Loading model from checkpoint: {checkpoint_path}")
+        model = load_model_from_checkpoint(str(checkpoint_path), cfg)
+
+        # Get tokenizer
+        tokenizer = (
+            model.model.net.tokenizer
+            if hasattr(model.model, "net")
+            else model.model.decoder.net.tokenizer
         )
-    gen_output_dir = logs_dir / "generated_sequences"
-    gen_output_dir.mkdir(parents=True, exist_ok=True)
-    
-    args = SimpleNamespace()
-    args.seed = None
-    args.architecture = type(model.model).__name__
-    args.num_seqs = num_seqs
-    args.seq_lens = seq_lens
-    args.class_ids = None
-    args.saveto = str(gen_output_dir)
-    args.temperature = float(gen_temperature)
-    args.sampling_strategy = gen_sampling_strategy
-    args.max_iter = int(gen_max_iter)
-    args.batch_lens_together = True
-    args.batch_size = int(gen_batch_size)
-    args.cond_seq = None
-    args.cache_dir = None
-    
-    fasta_path = generate(args, model.model, tokenizer, verbose=True)
-    print(f"Generated sequences saved to: {fasta_path}")
+
+        # Generate sequences
+        if gen_use_template:
+            if template_mode == "sequence":
+                print(
+                    f"Generating {len(num_seqs)} sequences from sequence template in: "
+                    f"{enzyme_explorer_template_seqs}"
+                )
+            else:
+                print(
+                    "Generating from length/count template with "
+                    f"{len(num_seqs)} length buckets in: {enzyme_explorer_template_seqs}"
+                )
+        else:
+            print(
+                "Generating fixed plan with "
+                f"num_seqs={num_seqs}, seq_lens={seq_lens}"
+            )
+        gen_output_dir = logs_dir / "generated_sequences"
+        gen_output_dir.mkdir(parents=True, exist_ok=True)
+
+        args = SimpleNamespace()
+        args.seed = None
+        args.architecture = type(model.model).__name__
+        args.num_seqs = num_seqs
+        args.seq_lens = seq_lens
+        args.class_ids = None
+        args.saveto = str(gen_output_dir)
+        args.temperature = float(gen_temperature)
+        args.sampling_strategy = gen_sampling_strategy
+        args.max_iter = int(gen_max_iter)
+        args.batch_lens_together = True
+        args.batch_size = int(gen_batch_size)
+        args.cond_seq = None
+        args.cache_dir = None
+
+        fasta_path = generate(args, model.model, tokenizer, verbose=True)
+        print(f"Generated sequences saved to: {fasta_path}")
+    else:
+        fasta_path = str(input_fasta_path)
+        print(f"Using pre-generated sequences from FASTA: {fasta_path}")
     
     # Evaluate with EnzymeExplorer
     print("Evaluating generated sequences with EnzymeExplorer...")

@@ -13,8 +13,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 #   DRY_RUN=1 bash runs/run_checkpoint_evaluation.sh
 #   CLUSTER=karolina CHECKPOINT=path/to/checkpoint.ckpt DRY_RUN=1 bash runs/run_checkpoint_evaluation.sh
 #   CLUSTER=karolina CHECKPOINT=path/to/checkpoint.ckpt bash runs/run_checkpoint_evaluation.sh
+#   EXISTING_FASTA_PATH=logs/my_eval/generated_sequences/sampled.fasta DRY_RUN=1 bash runs/run_checkpoint_evaluation.sh
 #
-# Common overrides: DATADIR, CHECKPOINT, CLUSTER, SCHEDULER_TYPE, SCHEDULER_RESOURCE_SPEC, JOB_*, GEN_*, METACENTRUM_MAMBA_ENV, KAROLINA_CONDA_ENV.
+# Common overrides: DATADIR, CHECKPOINT, EXISTING_FASTA_PATH, CLUSTER, SCHEDULER_TYPE, SCHEDULER_RESOURCE_SPEC, JOB_*, GEN_*, METACENTRUM_MAMBA_ENV, KAROLINA_CONDA_ENV.
 
 # -------------------------
 # User-Configurable Variables
@@ -22,6 +23,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 DATADIR="${DATADIR:-$REPO_ROOT}"
 CHECKPOINT="${CHECKPOINT:-logs/TPS_dplm_150m_stage3_run_8/checkpoints/N-Step-Checkpoint_epoch=172_step=20000.ckpt}"
+EXISTING_FASTA_PATH="${EXISTING_FASTA_PATH:-}"
 EVAL_NAME="${EVAL_NAME:-}"
 EVAL_EXPERIMENT="${EVAL_EXPERIMENT:-tps/TPS_dplm_150m_stage3}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -58,7 +60,7 @@ ENZYME_EXPLORER_DETECTION_THRESHOLD="${ENZYME_EXPLORER_DETECTION_THRESHOLD:-0.0}
 ENZYME_EXPLORER_DETECT_PRECURSOR_SYNTHASES="${ENZYME_EXPLORER_DETECT_PRECURSOR_SYNTHASES:-true}"
 
 METACENTRUM_MAMBA_ENV="${METACENTRUM_MAMBA_ENV:-/storage/brno2/home/soldatmat/.conda/envs/dplm}"
-KAROLINA_CONDA_ENV="${KAROLINA_CONDA_ENV:-dplm}"
+KAROLINA_CONDA_ENV="${KAROLINA_CONDA_ENV:-/mnt/proj2/fta-26-15/.conda/envs/dplm}"
 
 DEFAULT_RESOURCE_SPEC=""
 
@@ -110,6 +112,19 @@ derive_eval_name_from_checkpoint() {
     printf 'checkpoint_eval_%s_%s' "$run_name" "$checkpoint_name"
 }
 
+derive_eval_name_from_fasta() {
+    local fasta_path="$1"
+    local fasta_name
+
+    fasta_name="$(basename "$fasta_path")"
+    fasta_name="${fasta_name%.fasta}"
+    fasta_name="${fasta_name%.fa}"
+    fasta_name="${fasta_name%.faa}"
+    fasta_name="$(sanitize_name_component "$fasta_name")"
+
+    printf 'checkpoint_eval_existingfasta_%s' "$fasta_name"
+}
+
 derive_seqlen_suffix() {
     local seq_lens_value="$1"
     local first_len
@@ -135,19 +150,37 @@ derive_template_suffix() {
 
 # Normalize path-like inputs so the script is robust regardless of caller CWD.
 DATADIR="$(cd "$DATADIR" && pwd)"
-CHECKPOINT="$(resolve_path_under_datadir "$CHECKPOINT")"
+if [[ -n "$CHECKPOINT" ]]; then
+    CHECKPOINT="$(resolve_path_under_datadir "$CHECKPOINT")"
+fi
+if [[ -n "$EXISTING_FASTA_PATH" ]]; then
+    EXISTING_FASTA_PATH="$(resolve_path_under_datadir "$EXISTING_FASTA_PATH")"
+fi
 ENZYME_EXPLORER_TEMPLATE_SEQS="$(resolve_path_under_datadir "$ENZYME_EXPLORER_TEMPLATE_SEQS")"
 ENZYME_EXPLORER_CHECKPOINT_DIR="$(resolve_path_under_datadir "$ENZYME_EXPLORER_CHECKPOINT_DIR")"
 if [[ -z "$EVAL_NAME" ]]; then
-    EVAL_NAME="$(derive_eval_name_from_checkpoint "$CHECKPOINT")"
-    case "${GEN_USE_TEMPLATE,,}" in
-        false|0|no)
-            EVAL_NAME+="_$(derive_seqlen_suffix "$GEN_SEQ_LENS")"
-            ;;
-        *)
-            EVAL_NAME+="_$(derive_template_suffix "$ENZYME_EXPLORER_TEMPLATE_SEQS")"
-            ;;
-    esac
+    if [[ -n "$EXISTING_FASTA_PATH" ]]; then
+        EVAL_NAME="$(derive_eval_name_from_fasta "$EXISTING_FASTA_PATH")"
+    else
+        EVAL_NAME="$(derive_eval_name_from_checkpoint "$CHECKPOINT")"
+        case "${GEN_USE_TEMPLATE,,}" in
+            false|0|no)
+                EVAL_NAME+="_$(derive_seqlen_suffix "$GEN_SEQ_LENS")"
+                ;;
+            *)
+                EVAL_NAME+="_$(derive_template_suffix "$ENZYME_EXPLORER_TEMPLATE_SEQS")"
+                ;;
+        esac
+    fi
+fi
+
+if [[ -n "$EXISTING_FASTA_PATH" && ! -f "$EXISTING_FASTA_PATH" ]]; then
+    echo >&2 "EXISTING_FASTA_PATH does not exist: $EXISTING_FASTA_PATH"
+    exit 1
+fi
+
+if [[ -n "$EXISTING_FASTA_PATH" && -n "$CHECKPOINT" ]]; then
+    echo >&2 "Warning: EXISTING_FASTA_PATH is set, so generation is skipped and CHECKPOINT is ignored."
 fi
 
 # -------------------------
@@ -199,6 +232,9 @@ if [[ "$DRY_RUN" == "1" ]]; then
     else
         echo "[DRY_RUN] sbatch for checkpoint evaluation: $CHECKPOINT"
     fi
+    if [[ -n "$EXISTING_FASTA_PATH" ]]; then
+        echo "[DRY_RUN] existing FASTA mode: $EXISTING_FASTA_PATH"
+    fi
     echo "[DRY_RUN] eval logs folder: $DATADIR/logs/$EVAL_NAME"
     exit 0
 fi
@@ -214,6 +250,7 @@ export CUDA_VISIBLE_DEVICES=0,
 
 DATADIR="${DATADIR}"
 CHECKPOINT="${CHECKPOINT}"
+EXISTING_FASTA_PATH="${EXISTING_FASTA_PATH}"
 EVAL_NAME="${EVAL_NAME}"
 HYDRA_RUN_DIR="$DATADIR/logs/$EVAL_NAME/hydra"
 
@@ -244,6 +281,7 @@ cd "$DATADIR/runs"
 python evaluate_checkpoint.py --config-path ../configs \
     experiment='"$EVAL_EXPERIMENT"' \
     +checkpoint_path='"$CHECKPOINT"' \
+    +input_fasta_path='"$EXISTING_FASTA_PATH"' \
     +eval_name='"$EVAL_NAME"' \
     +datadir='"$DATADIR"' \
     hydra.run.dir='"$DATADIR/logs/$EVAL_NAME/hydra"' \
@@ -277,6 +315,7 @@ export CUDA_VISIBLE_DEVICES=0,
 
 DATADIR="${DATADIR}"
 CHECKPOINT="${CHECKPOINT}"
+EXISTING_FASTA_PATH="${EXISTING_FASTA_PATH}"
 EVAL_NAME="${EVAL_NAME}"
 HYDRA_RUN_DIR="$DATADIR/logs/$EVAL_NAME/hydra"
 
@@ -326,6 +365,7 @@ cd "$DATADIR/runs"
 conda run "\${CONDA_RUN_ARGS[@]}" python evaluate_checkpoint.py --config-path ../configs \
     experiment='"$EVAL_EXPERIMENT"' \
     +checkpoint_path='"$CHECKPOINT"' \
+    +input_fasta_path='"$EXISTING_FASTA_PATH"' \
     +eval_name='"$EVAL_NAME"' \
     +datadir='"$DATADIR"' \
     hydra.run.dir='"$DATADIR/logs/$EVAL_NAME/hydra"' \
