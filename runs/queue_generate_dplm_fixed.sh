@@ -11,29 +11,45 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="/mnt/proj2/fta-26-15/documents/dplm"
-CHECKPOINT="/mnt/proj2/fta-26-15/documents/dplm/logs/TPS_dplm_150m_stage3_run_8/checkpoints/N-Step-Checkpoint_epoch=172_step=20000.ckpt"
-CSV_PATH="/mnt/proj2/fta-26-15/documents/output/dplm/sampled_lengths_1000.csv"
-SAVE_DIR="/mnt/proj2/fta-26-15/documents/output/dplm/TPS_dplm_150m_stage3_run_8_step20000/sl1000_t1.0-generate_dplm_fixed"
-CONDA_ENV="/mnt/proj2/fta-26-15/.conda/envs/dplm"
+PROJECT_ROOT="${PROJECT_ROOT:-/mnt/proj2/fta-26-15/documents/dplm}"
+CHECKPOINT="${CHECKPOINT:-/mnt/proj2/fta-26-15/documents/dplm/logs/TPS_dplm_150m_stage3_run_8/checkpoints/N-Step-Checkpoint_epoch=172_step=20000.ckpt}"
+CSV_PATH="${CSV_PATH:-/mnt/proj2/fta-26-15/documents/output/dplm/sampled_lengths_1000.csv}"
+SAVE_DIR="${SAVE_DIR:-/mnt/proj2/fta-26-15/documents/output/dplm/TPS_dplm_150m_stage3_run_8_step20000/sl1000_t1.0-generate_dplm_fixed}"
+CONDA_ENV="${CONDA_ENV:-/mnt/proj2/fta-26-15/.conda/envs/dplm}"
 PYTHON_BIN="$CONDA_ENV/bin/python"
+INLINE_SEQ_LENS="${INLINE_SEQ_LENS:-}"
+INLINE_NUM_SEQS="${INLINE_NUM_SEQS:-}"
 
 if [[ ! -f "$CHECKPOINT" ]]; then
     echo "Checkpoint not found: $CHECKPOINT" >&2
     exit 1
 fi
 
-if [[ ! -f "$CSV_PATH" ]]; then
-    echo "CSV not found: $CSV_PATH" >&2
+mkdir -p "$SAVE_DIR"
+
+if [[ ! -x "$PYTHON_BIN" ]]; then
+    echo "Python executable not found in env: $PYTHON_BIN" >&2
     exit 1
 fi
 
-mkdir -p "$SAVE_DIR"
+if [[ -n "$INLINE_SEQ_LENS" || -n "$INLINE_NUM_SEQS" ]]; then
+    if [[ -z "$INLINE_SEQ_LENS" || -z "$INLINE_NUM_SEQS" ]]; then
+        echo "Both INLINE_SEQ_LENS and INLINE_NUM_SEQS must be set when using inline values." >&2
+        exit 1
+    fi
+    read -r -a SEQ_LENS <<< "$INLINE_SEQ_LENS"
+    read -r -a NUM_SEQS <<< "$INLINE_NUM_SEQS"
+else
+    if [[ ! -f "$CSV_PATH" ]]; then
+        echo "CSV not found: $CSV_PATH" >&2
+        exit 1
+    fi
 
-readarray -t parsed_csv < <(python - <<'PY'
+readarray -t parsed_csv < <("$PYTHON_BIN" - <<'PY'
 import csv
+import os
 
-csv_path = "/mnt/proj2/fta-26-15/documents/output/dplm/sampled_lengths_1000.csv"
+csv_path = os.environ["CSV_PATH"]
 lengths = []
 counts = []
 
@@ -48,21 +64,17 @@ print(" ".join(counts))
 PY
 )
 
-if [[ ${#parsed_csv[@]} -ne 2 ]]; then
-    echo "Failed to parse CSV into seq_lens and num_seqs." >&2
-    exit 1
-fi
+    if [[ ${#parsed_csv[@]} -ne 2 ]]; then
+        echo "Failed to parse CSV into seq_lens and num_seqs." >&2
+        exit 1
+    fi
 
-read -r -a SEQ_LENS <<< "${parsed_csv[0]}"
-read -r -a NUM_SEQS <<< "${parsed_csv[1]}"
+    read -r -a SEQ_LENS <<< "${parsed_csv[0]}"
+    read -r -a NUM_SEQS <<< "${parsed_csv[1]}"
+fi
 
 if [[ ${#SEQ_LENS[@]} -eq 0 || ${#SEQ_LENS[@]} -ne ${#NUM_SEQS[@]} ]]; then
     echo "Parsed seq_lens/num_seqs are invalid: ${#SEQ_LENS[@]} vs ${#NUM_SEQS[@]}" >&2
-    exit 1
-fi
-
-if [[ ! -x "$PYTHON_BIN" ]]; then
-    echo "Python executable not found in env: $PYTHON_BIN" >&2
     exit 1
 fi
 
