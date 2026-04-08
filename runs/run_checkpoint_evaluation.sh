@@ -173,6 +173,7 @@ if [[ -z "$EVAL_NAME" ]]; then
                 ;;
         esac
     fi
+    EVAL_NAME="checkpoint_eval/$EVAL_NAME"
 fi
 
 if [[ -n "$EXISTING_FASTA_PATH" && ! -f "$EXISTING_FASTA_PATH" ]]; then

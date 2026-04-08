@@ -377,7 +377,7 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         sampling_strategy: str = "gumbel_argmax",
         temperature: float = 1.0,
         saveto: str = "./dplm_generated",
-        generation_batch_size: int = 32,
+        generation_batch_size: int = 256,
         generation_batch_lens_together: bool = True,
         enzymeexplorer_detection_threshold: float = 0.0,
         enzymeexplorer_detect_precursor_synthases: bool = True,
