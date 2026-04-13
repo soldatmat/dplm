@@ -14,6 +14,7 @@ import pickle
 
 # from pytorch_lightning.utilities.imports import _RICH_AVAILABLE
 from importlib.util import find_spec
+from collections.abc import Sequence
 from typing import Callable, Dict, List, Optional, Union
 
 import pandas as pd
@@ -376,14 +377,19 @@ class ValidateWithEnzymeExplorer(pl.Callback):
 
         if isinstance(value, int):
             normalized = [value]
-        elif isinstance(value, list):
-            if len(value) == 0:
+        elif isinstance(value, Sequence) and not isinstance(
+            value, (str, bytes)
+        ):
+            normalized = list(value)
+            if len(normalized) == 0:
                 raise ValueError(f"{field_name} cannot be an empty list")
-            if any(isinstance(v, bool) or not isinstance(v, int) for v in value):
+            if any(
+                isinstance(v, bool) or not isinstance(v, int)
+                for v in normalized
+            ):
                 raise TypeError(
                     f"{field_name} must be an int or a list of ints"
                 )
-            normalized = value
         else:
             raise TypeError(f"{field_name} must be an int or a list of ints")
 
