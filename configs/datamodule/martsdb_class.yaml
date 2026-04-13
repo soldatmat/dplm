@@ -1,7 +1,7 @@
 _target_: martsdb_class
 
 # data_dir: ${data_dir} # data_dir is specified in config.yaml
-data_path: ${paths.data_dir}/MARTS-DB/2025-11-19/TPS_first_cyclization.csv
+data_path: ${paths.data_dir}/MARTS-DB/2026-04-12/TPS_first_cyclization.csv
 
 # alphabet related # TODO check if alphabet parameters make sense
 alphabet:
