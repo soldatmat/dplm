@@ -185,6 +185,9 @@ if [[ -n "$EXISTING_FASTA_PATH" && -n "$CHECKPOINT" ]]; then
     echo >&2 "Warning: EXISTING_FASTA_PATH is set, so generation is skipped and CHECKPOINT is ignored."
 fi
 
+# Ensure output directory exists before scheduler submission so scheduler-managed logs can land there.
+mkdir -p "$DATADIR/logs/$EVAL_NAME"
+
 # -------------------------
 # Internal Setup And Validation
 # -------------------------
@@ -308,7 +311,9 @@ if command -v clean_scratch >/dev/null 2>&1; then
 fi
 PBES_SCRIPT
 else
-    sbatch --job-name="chkpt_eval" -A "$PROJECT_ID" <<SLURM_SCRIPT
+    sbatch --job-name="chkpt_eval" -A "$PROJECT_ID" \
+        --output="$DATADIR/logs/$EVAL_NAME/slurm-%j.out" \
+        --error="$DATADIR/logs/$EVAL_NAME/slurm-%j.out" <<SLURM_SCRIPT
 #!/bin/bash
 ${SCHEDULER_RESOURCE_SPEC}
 
