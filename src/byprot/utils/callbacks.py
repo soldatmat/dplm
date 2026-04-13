@@ -146,7 +146,9 @@ if _RICH_AVAILABLE:
                 self._reset_progress_bar_ids()
                 reconfigure(**self._console_kwargs)
                 self._console = get_console()
-                self._console.clear_live()
+                # Avoid Rich IndexError when no live context has been created yet.
+                if getattr(self._console, "_live_stack", None):
+                    self._console.clear_live()
                 self._metric_component = BetterMetricsTextColumn(
                     trainer,
                     self.theme.metrics,
