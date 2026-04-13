@@ -29,11 +29,18 @@ SCHEDULER_RESOURCE_SPEC="${SCHEDULER_RESOURCE_SPEC:-}"
 JOB_NODES="${JOB_NODES:-1}"
 JOB_NCPUS="${JOB_NCPUS:-1}"
 JOB_NGPUS="${JOB_NGPUS:-1}"
+JOB_ACCOUNT="${JOB_ACCOUNT:-fta-26-15}"
+JOB_PARTITION="${JOB_PARTITION:-qgpu}"
 JOB_GPU_MEM="${JOB_GPU_MEM:-46gb}"
 JOB_MEM_PBS="${JOB_MEM_PBS:-64gb}"
 JOB_MEM_SLURM="${JOB_MEM_SLURM:-64G}"
 JOB_SCRATCH_LOCAL="${JOB_SCRATCH_LOCAL:-40gb}"
 JOB_WALLTIME="${JOB_WALLTIME:-24:00:00}"
+if [[ "$CLUSTER" == "karolina" ]]; then
+    TRAIN_ENV="${TRAIN_ENV:-/mnt/proj2/fta-26-15/.conda/envs/dplm}"
+else
+    TRAIN_ENV="${TRAIN_ENV:-/storage/brno2/home/soldatmat/.conda/envs/dplm}"
+fi
 
 TRAIN_LR_LIST="${TRAIN_LR_LIST:-1e-3 1e-4 1e-5}"
 WARMUP_STEPS_LIST="${WARMUP_STEPS_LIST:-2000}"
@@ -58,7 +65,9 @@ if [[ "$CLUSTER" == "metacentrum" ]]; then
 elif [[ "$CLUSTER" == "karolina" ]]; then
     SCHEDULER_TYPE="${SCHEDULER_TYPE:-slurm}"
     # Karolina typically uses Slurm. Override as needed for your partition/QoS.
-    printf -v DEFAULT_RESOURCE_SPEC '%s\n%s\n%s\n%s\n%s' \
+    printf -v DEFAULT_RESOURCE_SPEC '%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+        "#SBATCH -A ${JOB_ACCOUNT}" \
+        "#SBATCH --partition=${JOB_PARTITION}" \
         "#SBATCH --nodes=${JOB_NODES}" \
         "#SBATCH --gres=gpu:${JOB_NGPUS}" \
         "#SBATCH --cpus-per-task=${JOB_NCPUS}" \
@@ -123,20 +132,18 @@ resolve_lr_value() {
 submit_job() {
     local train_lr="$1"
     local warmup_steps="$2"
-    local max_steps="$3"
-    local lr_end_raw="$4"
-    local warmup_init_lr_raw="$5"
-    local lora_enable="$6"
+    local lr_end_raw="$3"
+    local warmup_init_lr_raw="$4"
+    local lora_enable="$5"
     local lr_end
     local warmup_init_lr
 
     lr_end="$(resolve_lr_value "$lr_end_raw" "$train_lr")"
     warmup_init_lr="$(resolve_lr_value "$warmup_init_lr_raw" "$train_lr")"
 
-    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_ms${max_steps}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}"
+    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}"
     local lr_code
     local warmup_code
-    local max_steps_code
     local lr_end_code
     local warmup_init_code
     local lora_code
@@ -145,7 +152,6 @@ submit_job() {
     lr_code=$(value_code "$train_lr")
     lr_end_code=$(value_code "$lr_end")
     warmup_init_code=$(value_code "$warmup_init_lr")
-    max_steps_code=$(value_code "$max_steps")
     lora_code=$([ "$lora_enable" = "true" ] && echo "t" || echo "f")
     if (( warmup_steps % 1000 == 0 )); then
         warmup_code="$((warmup_steps / 1000))k"
@@ -153,7 +159,7 @@ submit_job() {
         warmup_code="$warmup_steps"
     fi
 
-    job_name="d3l${lr_code}w${warmup_code}m${max_steps_code}e${lr_end_code}i${warmup_init_code}${lora_code}"
+    job_name="d3l${lr_code}w${warmup_code}e${lr_end_code}i${warmup_init_code}${lora_code}"
     job_name=$(echo "$job_name" | cut -c1-15)
 
     if [[ "$DRY_RUN" == "1" ]]; then
@@ -195,19 +201,35 @@ export TMPDIR="\$work_scratch/tmp"
 mkdir -p "\$work_scratch/dplm"
 cp -r "\$DATADIR/data-bin" "\$work_scratch/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }
 
-module add mambaforge
-mamba activate /storage/brno2/home/soldatmat/.conda/envs/dplm
+module add mambaforge >/dev/null 2>&1 || true
+ml Anaconda3 >/dev/null 2>&1 || true
+
+if command -v conda >/dev/null 2>&1; then
+    if [[ "$TRAIN_ENV" == /* ]]; then
+        PY_RUNNER=(conda run -p "$TRAIN_ENV")
+    else
+        PY_RUNNER=(conda run -n "$TRAIN_ENV")
+    fi
+elif command -v mamba >/dev/null 2>&1; then
+    if [[ "$TRAIN_ENV" == /* ]]; then
+        PY_RUNNER=(mamba run -p "$TRAIN_ENV")
+    else
+        PY_RUNNER=(mamba run -n "$TRAIN_ENV")
+    fi
+else
+    echo >&2 "Neither conda nor mamba is available after module setup."
+    exit 3
+fi
 
 cd "\$DATADIR"
 
-python train.py \
+"\${PY_RUNNER[@]}" python train.py \
     experiment=\${exp} \
     name=\${run_name} \
     paths.data_dir=\$work_scratch/dplm/data-bin \
     paths.log_dir=\$work_scratch/dplm/logs/\${run_name} \
     train.lr=${train_lr} \
     task.lr_scheduler.warmup_steps=${warmup_steps} \
-    trainer.max_steps=${max_steps} \
     task.lr_scheduler.lr_end=${lr_end} \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
     model.lora.enable=${lora_enable}
@@ -219,7 +241,11 @@ if command -v clean_scratch >/dev/null 2>&1; then
 fi
 EOF
     else
-        sbatch --job-name="$job_name" <<EOF
+        mkdir -p "$DATADIR/logs/${run_name}"
+        sbatch \
+            --job-name="$job_name" \
+            --output="$DATADIR/logs/${run_name}/slurm-%j.out" \
+            --error="$DATADIR/logs/${run_name}/slurm-%j.err" <<EOF
 #!/bin/bash
 ${SCHEDULER_RESOURCE_SPEC}
 
@@ -248,12 +274,29 @@ export TMPDIR="\$work_scratch/tmp"
 mkdir -p "\$work_scratch/dplm"
 cp -r "\$DATADIR/data-bin" "\$work_scratch/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }
 
-module add mambaforge
-mamba activate /storage/brno2/home/soldatmat/.conda/envs/dplm
+module add mambaforge >/dev/null 2>&1 || true
+ml Anaconda3 >/dev/null 2>&1 || true
+
+if command -v conda >/dev/null 2>&1; then
+    if [[ "$TRAIN_ENV" == /* ]]; then
+        PY_RUNNER=(conda run -p "$TRAIN_ENV")
+    else
+        PY_RUNNER=(conda run -n "$TRAIN_ENV")
+    fi
+elif command -v mamba >/dev/null 2>&1; then
+    if [[ "$TRAIN_ENV" == /* ]]; then
+        PY_RUNNER=(mamba run -p "$TRAIN_ENV")
+    else
+        PY_RUNNER=(mamba run -n "$TRAIN_ENV")
+    fi
+else
+    echo >&2 "Neither conda nor mamba is available after module setup."
+    exit 3
+fi
 
 cd "\$DATADIR"
 
-python train.py \
+"\${PY_RUNNER[@]}" python train.py \
     experiment=\${exp} \
     name=\${run_name} \
     paths.data_dir=\$work_scratch/dplm/data-bin \
@@ -276,13 +319,11 @@ EOF
 total=0
 for train_lr in "${TRAIN_LR_VALUES[@]}"; do
     for warmup_steps in "${WARMUP_STEPS_VALUES[@]}"; do
-        for max_steps in "${MAX_STEPS_VALUES[@]}"; do
-            for lr_end in "${LR_END_VALUES[@]}"; do
-                for warmup_init_lr in "${WARMUP_INIT_LR_VALUES[@]}"; do
-                    for lora_enable in "${LORA_ENABLE_VALUES[@]}"; do
-                        submit_job "$train_lr" "$warmup_steps" "$max_steps" "$lr_end" "$warmup_init_lr" "$lora_enable"
-                        total=$((total + 1))
-                    done
+        for lr_end in "${LR_END_VALUES[@]}"; do
+            for warmup_init_lr in "${WARMUP_INIT_LR_VALUES[@]}"; do
+                for lora_enable in "${LORA_ENABLE_VALUES[@]}"; do
+                    submit_job "$train_lr" "$warmup_steps" "$lr_end" "$warmup_init_lr" "$lora_enable"
+                    total=$((total + 1))
                 done
             done
         done
