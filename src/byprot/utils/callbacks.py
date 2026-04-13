@@ -14,7 +14,7 @@ import pickle
 
 # from pytorch_lightning.utilities.imports import _RICH_AVAILABLE
 from importlib.util import find_spec
-from typing import Callable, Dict
+from typing import Callable, Dict, List, Optional, Union
 
 import pandas as pd
 import pkg_resources
@@ -367,12 +367,38 @@ class TrackNorms(pl.Callback):
 
 
 class ValidateWithEnzymeExplorer(pl.Callback):
+    @staticmethod
+    def _normalize_positive_int_list(
+        value: Union[int, List[int]], field_name: str
+    ) -> List[int]:
+        if isinstance(value, bool):
+            raise TypeError(f"{field_name} must be an int or a list of ints")
+
+        if isinstance(value, int):
+            normalized = [value]
+        elif isinstance(value, list):
+            if len(value) == 0:
+                raise ValueError(f"{field_name} cannot be an empty list")
+            if any(isinstance(v, bool) or not isinstance(v, int) for v in value):
+                raise TypeError(
+                    f"{field_name} must be an int or a list of ints"
+                )
+            normalized = value
+        else:
+            raise TypeError(f"{field_name} must be an int or a list of ints")
+
+        if any(v <= 0 for v in normalized):
+            raise ValueError(f"{field_name} values must be > 0")
+        return normalized
+
     def __init__(
         self,
-        template_sequences_file: str,
         enzymeexplorer_checkpoint_dir: str,
+        template_sequences_file: Optional[str] = None,
         sequence_column_name: str = "sequence",
         class_id_column_name: str = None,
+        num_seqs: Optional[Union[int, List[int]]] = None,
+        seq_lens: Optional[Union[int, List[int]]] = None,
         max_iter: int = 500,
         sampling_strategy: str = "gumbel_argmax",
         temperature: float = 1.0,
@@ -382,44 +408,77 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         enzymeexplorer_detection_threshold: float = 0.0,
         enzymeexplorer_detect_precursor_synthases: bool = True,
         enzymeexplorer_model: str = "esm-1v-finetuned-subseq",
-        every_n_epochs: int = 1,
+        every_n_train_steps: int = 1000,
     ):
-        logger.info(f"template_sequences_file: {template_sequences_file}")
-        data = pd.read_csv(template_sequences_file)
-        seq_lens_raw = data[sequence_column_name].apply(len).tolist()
-        if class_id_column_name is not None:
-            class_ids_raw = data[class_id_column_name].tolist()
-        else:
-            class_ids_raw = None
-
         if not isinstance(generation_batch_lens_together, bool):
             raise TypeError(
                 "generation_batch_lens_together must be a boolean"
             )
         self.generation_batch_lens_together = generation_batch_lens_together
-        if self.generation_batch_lens_together:
-            self.seq_lens = seq_lens_raw
-            self.num_seqs = [1 for _ in self.seq_lens]
-            self.class_ids = class_ids_raw
-        else:
-            # In non-together mode, generate() iterates over length buckets and
-            # expects matching num_seqs counts for each bucket.
-            bucket_counts = {}
-            bucket_order = []
-            for i, seq_len in enumerate(seq_lens_raw):
-                class_id = class_ids_raw[i] if class_ids_raw is not None else None
-                key = (seq_len, class_id)
-                if key not in bucket_counts:
-                    bucket_counts[key] = 0
-                    bucket_order.append(key)
-                bucket_counts[key] += 1
 
-            self.seq_lens = [seq_len for seq_len, _ in bucket_order]
-            self.num_seqs = [bucket_counts[key] for key in bucket_order]
-            if class_ids_raw is not None:
-                self.class_ids = [class_id for _, class_id in bucket_order]
+        if template_sequences_file is not None and (
+            num_seqs is not None or seq_lens is not None
+        ):
+            raise ValueError(
+                "Provide either template_sequences_file or both num_seqs and seq_lens, not both"
+            )
+
+        if template_sequences_file is None and (
+            num_seqs is None or seq_lens is None
+        ):
+            raise ValueError(
+                "Provide template_sequences_file, or provide both num_seqs and seq_lens"
+            )
+
+        if template_sequences_file is not None:
+            logger.info(f"template_sequences_file: {template_sequences_file}")
+            data = pd.read_csv(template_sequences_file)
+            seq_lens_raw = data[sequence_column_name].apply(len).tolist()
+            if class_id_column_name is not None:
+                class_ids_raw = data[class_id_column_name].tolist()
             else:
-                self.class_ids = None
+                class_ids_raw = None
+
+            if self.generation_batch_lens_together:
+                self.seq_lens = seq_lens_raw
+                self.num_seqs = [1 for _ in self.seq_lens]
+                self.class_ids = class_ids_raw
+            else:
+                # In non-together mode, generate() iterates over length buckets and
+                # expects matching num_seqs counts for each bucket.
+                bucket_counts = {}
+                bucket_order = []
+                for i, seq_len in enumerate(seq_lens_raw):
+                    class_id = class_ids_raw[i] if class_ids_raw is not None else None
+                    key = (seq_len, class_id)
+                    if key not in bucket_counts:
+                        bucket_counts[key] = 0
+                        bucket_order.append(key)
+                    bucket_counts[key] += 1
+
+                self.seq_lens = [seq_len for seq_len, _ in bucket_order]
+                self.num_seqs = [bucket_counts[key] for key in bucket_order]
+                if class_ids_raw is not None:
+                    self.class_ids = [class_id for _, class_id in bucket_order]
+                else:
+                    self.class_ids = None
+        else:
+            self.num_seqs = self._normalize_positive_int_list(num_seqs, "num_seqs")  # type: ignore[arg-type]
+            self.seq_lens = self._normalize_positive_int_list(seq_lens, "seq_lens")  # type: ignore[arg-type]
+            if len(self.num_seqs) not in {1, len(self.seq_lens)}:
+                raise ValueError(
+                    "num_seqs must have length 1 or match seq_lens length"
+                )
+            self.class_ids = None
+            if class_id_column_name is not None:
+                logger.warning(
+                    "class_id_column_name is ignored when template_sequences_file is not provided"
+                )
+            logger.info(
+                "ValidateWithEnzymeExplorer explicit generation plan: num_seqs=%s, seq_lens=%s",
+                self.num_seqs,
+                self.seq_lens,
+            )
 
         logger.info(
             "ValidateWithEnzymeExplorer generation plan: batch_lens_together=%s, buckets=%d",
@@ -442,7 +501,10 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         logger.info(f"enzymeexplorer_classifier_checkpoint_path: {self.enzymeexplorer_classifier_checkpoint_path}")
         self.enzymeexplorer_max_len = 1022
 
-        self.every_n_epochs = every_n_epochs
+        if every_n_train_steps <= 0:
+            raise ValueError("every_n_train_steps must be > 0")
+        self.every_n_train_steps = every_n_train_steps
+        self._last_eval_global_step: Optional[int] = None
 
         # args: model, plm_checkpoint_dir, max_len
         args = SimpleNamespace()
@@ -507,14 +569,7 @@ class ValidateWithEnzymeExplorer(pl.Callback):
 
         rmtree(intermediate_outputs_root)
 
-    def on_validation_epoch_end(self, trainer, pl_module):
-        if (trainer.current_epoch + 1) % self.every_n_epochs == 0: # epochs are numbered from 0 in PyTorch Lightning
-            logger.info(f"ValidateWithEnzymeExplorer after train epoch {trainer.current_epoch + 1}")
-        elif trainer.sanity_checking:
-            logger.info("ValidateWithEnzymeExplorer before training")
-        else:
-            return
-
+    def _run_evaluation(self, trainer, pl_module, run_label: str):
         model = pl_module.model
         tokenizer = pl_module.model.net.tokenizer if hasattr(pl_module.model, 'net') else pl_module.model.decoder.net.tokenizer
 
@@ -525,7 +580,7 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         args.num_seqs = self.num_seqs
         args.seq_lens = self.seq_lens
         args.class_ids = self.class_ids
-        args.saveto = os.path.join(self.saveto, "epoch_" + str(trainer.current_epoch + 1)) # epochs are numbered from 0 in PyTorch Lightning
+        args.saveto = os.path.join(self.saveto, run_label)
         args.temperature = self.temperature
         args.sampling_strategy = self.sampling_strategy
         args.max_iter = self.max_iter
@@ -539,3 +594,24 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         output_csv_path = fasta_path.replace(".fasta", "_enzyme_explorer_sequence_only.csv")
         logger.info("Validating generated sequences with EnzymeExplorer")
         self._validate_with_enzymeexplorer(fasta_path, output_csv_path)
+
+    def on_sanity_check_end(self, trainer, pl_module):
+        logger.info("ValidateWithEnzymeExplorer before training")
+        self._run_evaluation(trainer, pl_module, "sanity_check_step_0")
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        global_step = trainer.global_step
+
+        if global_step <= 0:
+            return
+        if global_step == self._last_eval_global_step:
+            return
+        if global_step % self.every_n_train_steps != 0:
+            return
+
+        self._last_eval_global_step = global_step
+        logger.info(
+            "ValidateWithEnzymeExplorer after global training step %s",
+            global_step,
+        )
+        self._run_evaluation(trainer, pl_module, f"step_{global_step}")

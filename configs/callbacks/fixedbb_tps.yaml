@@ -25,17 +25,20 @@ model_checkpoint:
 
 checkpoint_every_n_steps:
   _target_: byprot.utils.callbacks.CheckpointEveryNSteps
-  save_step_frequency: 1000
+  save_step_frequency: 10000
 
 validate_with_enzyme_explorer:
   _target_: byprot.utils.callbacks.ValidateWithEnzymeExplorer
-  every_n_epochs: 100
-  template_sequences_file: ${datamodule.data_path}
+  every_n_train_steps: 10000
+  # Mode selection: use either template_* params OR explicit params below.
+  # template_sequences_file: ${datamodule.data_path} # template mode only
+  # sequence_column_name: "Aminoacid_sequence" # template mode only
+  # class_id_column_name: "First_cyclization_product_id" # template mode only
+  num_seqs: [50] # explicit mode only
+  seq_lens: [350] # explicit mode only
   enzymeexplorer_checkpoint_dir: ${paths.root_dir}/data-bin/checkpoints/enzymeexplorer
-  sequence_column_name: "Aminoacid_sequence"
-  class_id_column_name: "First_cyclization_product_id"
   saveto: ${paths.log_dir}/enzyme_explorer_validation
-  max_iter: 10 # 500
+  max_iter: 500
   generation_batch_size: 256
 
 # val_every_Nsteps:
