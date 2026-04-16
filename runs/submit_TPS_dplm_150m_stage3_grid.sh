@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Submit TPS dPLM grid jobs for PBS (MetaCentrum) or Slurm (Karolina).
+# Submit TPS DPLM grid jobs for PBS (MetaCentrum) or Slurm (Karolina).
 #
 # Syntax:
 #   [VAR=value ...] bash runs/dplm/submit_TPS_dplm_150m_stage3_grid.sh
@@ -44,6 +44,9 @@ fi
 
 TRAIN_LR_LIST="${TRAIN_LR_LIST:-1e-3 1e-4 1e-5}"
 WARMUP_STEPS_LIST="${WARMUP_STEPS_LIST:-2000}"
+TOTAL_STEPS_LIST="${TOTAL_STEPS_LIST:-200000}" # controls both lr_scheduler and length of training
+SAVE_STEP_FREQ_LIST="${SAVE_STEP_FREQ_LIST:-10000}"
+VAL_EE_FREQ_LIST="${VAL_EE_FREQ_LIST:-10000}"
 LR_END_LIST="${LR_END_LIST:-1e-1*tlr}"
 WARMUP_INIT_LR_LIST="${WARMUP_INIT_LR_LIST:-1e-3*tlr}"
 LORA_ENABLE_LIST="${LORA_ENABLE_LIST:-true}"
@@ -87,7 +90,12 @@ if [[ "$SCHEDULER_TYPE" != "pbs" && "$SCHEDULER_TYPE" != "slurm" ]]; then
 fi
 
 read -r -a TRAIN_LR_VALUES <<< "$TRAIN_LR_LIST"
+# Supports absolute values (e.g. 1e-6) and relative values (e.g. 1e-1*tlr).
 read -r -a WARMUP_STEPS_VALUES <<< "$WARMUP_STEPS_LIST"
+# Supports absolute values (e.g. 1e-6) and relative values (e.g. 1e-1*tlr).
+read -r -a TOTAL_STEPS_VALUES <<< "$TOTAL_STEPS_LIST"
+read -r -a SAVE_STEP_FREQ_VALUES <<< "$SAVE_STEP_FREQ_LIST"
+read -r -a VAL_EE_FREQ_VALUES <<< "$VAL_EE_FREQ_LIST"
 # Supports absolute values (e.g. 1e-6) and relative values (e.g. 1e-1*tlr).
 read -r -a LR_END_VALUES <<< "$LR_END_LIST"
 read -r -a WARMUP_INIT_LR_VALUES <<< "$WARMUP_INIT_LR_LIST"
@@ -129,21 +137,29 @@ resolve_lr_value() {
     awk -v a="$train_lr" -v b="$factor" 'BEGIN { printf "%.12g", a * b }'
 }
 
+
+
 submit_job() {
     local train_lr="$1"
     local warmup_steps="$2"
-    local lr_end_raw="$3"
-    local warmup_init_lr_raw="$4"
-    local lora_enable="$5"
+    local total_steps="$3"
+    local save_step_freq="$4"
+    local val_ee_freq="$5"
+    local lr_end_raw="$6"
+    local warmup_init_lr_raw="$7"
+    local lora_enable="$8"
     local lr_end
     local warmup_init_lr
 
     lr_end="$(resolve_lr_value "$lr_end_raw" "$train_lr")"
     warmup_init_lr="$(resolve_lr_value "$warmup_init_lr_raw" "$train_lr")"
 
-    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}"
+    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_ts${total_steps}_ckpt${save_step_freq}_valee${val_ee_freq}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}"
     local lr_code
     local warmup_code
+    local total_code
+    local save_code
+    local val_code
     local lr_end_code
     local warmup_init_code
     local lora_code
@@ -158,8 +174,23 @@ submit_job() {
     else
         warmup_code="$warmup_steps"
     fi
+    if (( total_steps % 1000 == 0 )); then
+        total_code="$((total_steps / 1000))k"
+    else
+        total_code="$total_steps"
+    fi
+    if (( save_step_freq % 1000 == 0 )); then
+        save_code="$((save_step_freq / 1000))k"
+    else
+        save_code="$save_step_freq"
+    fi
+    if (( val_ee_freq % 1000 == 0 )); then
+        val_code="$((val_ee_freq / 1000))k"
+    else
+        val_code="$val_ee_freq"
+    fi
 
-    job_name="d3l${lr_code}w${warmup_code}e${lr_end_code}i${warmup_init_code}${lora_code}"
+    job_name="d3l${lr_code}w${warmup_code}t${total_code}s${save_code}v${val_code}e${lr_end_code}i${warmup_init_code}${lora_code}"
     job_name=$(echo "$job_name" | cut -c1-15)
 
     if [[ "$DRY_RUN" == "1" ]]; then
@@ -194,6 +225,7 @@ else
     work_scratch="\$(mktemp -d /tmp/dplm_\${run_name}_XXXXXX)"
     trap 'rm -rf "\$work_scratch"' EXIT
 fi
+echo "Using work scratch directory: \$work_scratch"
 
 mkdir -p "\$work_scratch/tmp"
 export TMPDIR="\$work_scratch/tmp"
@@ -230,6 +262,10 @@ cd "\$DATADIR"
     paths.log_dir=\$work_scratch/dplm/logs/\${run_name} \
     train.lr=${train_lr} \
     task.lr_scheduler.warmup_steps=${warmup_steps} \
+    task.lr_scheduler.total_steps=${total_steps} \
+    trainer.max_steps=${total_steps} \
+    callbacks.checkpoint_every_n_steps.save_step_frequency=${save_step_freq} \
+    callbacks.validate_with_enzyme_explorer.every_n_train_steps=${val_ee_freq} \
     task.lr_scheduler.lr_end=${lr_end} \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
     model.lora.enable=${lora_enable}
@@ -267,6 +303,7 @@ else
     work_scratch="\$(mktemp -d /tmp/dplm_\${run_name}_XXXXXX)"
     trap 'rm -rf "\$work_scratch"' EXIT
 fi
+echo "Using work scratch directory: \$work_scratch"
 
 mkdir -p "\$work_scratch/tmp"
 export TMPDIR="\$work_scratch/tmp"
@@ -303,6 +340,10 @@ cd "\$DATADIR"
     paths.log_dir=\$work_scratch/dplm/logs/\${run_name} \
     train.lr=${train_lr} \
     task.lr_scheduler.warmup_steps=${warmup_steps} \
+    task.lr_scheduler.total_steps=${total_steps} \
+    trainer.max_steps=${total_steps} \
+    callbacks.checkpoint_every_n_steps.save_step_frequency=${save_step_freq} \
+    callbacks.validate_with_enzyme_explorer.every_n_train_steps=${val_ee_freq} \
     task.lr_scheduler.lr_end=${lr_end} \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
     model.lora.enable=${lora_enable}
@@ -319,11 +360,17 @@ EOF
 total=0
 for train_lr in "${TRAIN_LR_VALUES[@]}"; do
     for warmup_steps in "${WARMUP_STEPS_VALUES[@]}"; do
-        for lr_end in "${LR_END_VALUES[@]}"; do
-            for warmup_init_lr in "${WARMUP_INIT_LR_VALUES[@]}"; do
-                for lora_enable in "${LORA_ENABLE_VALUES[@]}"; do
-                    submit_job "$train_lr" "$warmup_steps" "$lr_end" "$warmup_init_lr" "$lora_enable"
-                    total=$((total + 1))
+        for total_steps in "${TOTAL_STEPS_VALUES[@]}"; do
+            for save_step_freq in "${SAVE_STEP_FREQ_VALUES[@]}"; do
+                for val_ee_freq in "${VAL_EE_FREQ_VALUES[@]}"; do
+                    for lr_end in "${LR_END_VALUES[@]}"; do
+                        for warmup_init_lr in "${WARMUP_INIT_LR_VALUES[@]}"; do
+                            for lora_enable in "${LORA_ENABLE_VALUES[@]}"; do
+                                submit_job "$train_lr" "$warmup_steps" "$total_steps" "$save_step_freq" "$val_ee_freq" "$lr_end" "$warmup_init_lr" "$lora_enable"
+                                total=$((total + 1))
+                            done
+                        done
+                    done
                 done
             done
         done
