@@ -54,6 +54,11 @@ WARMUP_INIT_LR_LIST="${WARMUP_INIT_LR_LIST:-1e-3*tlr}"
 LORA_ENABLE_LIST="${LORA_ENABLE_LIST:-true}"
 LORA_RANK_LIST="${LORA_RANK_LIST:-1}"
 LORA_ALPHA_LIST="${LORA_ALPHA_LIST:-2}"
+# Patterns themselves contain '|', so this list is ';'-separated.
+LORA_TARGET_MODULE_LIST="${LORA_TARGET_MODULE_LIST:-(esm.encoder.layer.[0-9]*.attention.self.key)}"
+# Optional ';'-separated labels matched 1:1 with LORA_TARGET_MODULE_LIST entries.
+# Used in run_name/job_name in place of the numeric index. Empty -> use indices.
+LORA_TARGET_MODULE_LABELS_LIST="${LORA_TARGET_MODULE_LABELS_LIST:-}"
 
 DEFAULT_RESOURCE_SPEC=""
 
@@ -111,6 +116,16 @@ read -r -a NUM_SEQS_VALUES <<< "$NUM_SEQS_LIST"
 # Read LoRA rank and alpha lists
 read -r -a LORA_RANK_VALUES <<< "$LORA_RANK_LIST"
 read -r -a LORA_ALPHA_VALUES <<< "$LORA_ALPHA_LIST"
+# Use ';' as separator since the patterns themselves contain '|' (and may contain spaces).
+IFS=';' read -r -a LORA_TARGET_MODULE_VALUES <<< "$LORA_TARGET_MODULE_LIST"
+LORA_TARGET_MODULE_LABELS_VALUES=()
+if [[ -n "$LORA_TARGET_MODULE_LABELS_LIST" ]]; then
+    IFS=';' read -r -a LORA_TARGET_MODULE_LABELS_VALUES <<< "$LORA_TARGET_MODULE_LABELS_LIST"
+    if [[ "${#LORA_TARGET_MODULE_LABELS_VALUES[@]}" -ne "${#LORA_TARGET_MODULE_VALUES[@]}" ]]; then
+        echo >&2 "LORA_TARGET_MODULE_LABELS_LIST has ${#LORA_TARGET_MODULE_LABELS_VALUES[@]} entries but LORA_TARGET_MODULE_LIST has ${#LORA_TARGET_MODULE_VALUES[@]}; counts must match."
+        exit 1
+    fi
+fi
 
 # -------------------------
 # Script Logic
@@ -164,13 +179,15 @@ submit_job() {
     local num_seqs="$9"
     local lora_rank="${10}"
     local lora_alpha="${11}"
+    local lora_target_module="${12}"
+    local ltm_idx="${13}"
     local lr_end
     local warmup_init_lr
 
     lr_end="$(resolve_lr_value "$lr_end_raw" "$train_lr")"
     warmup_init_lr="$(resolve_lr_value "$warmup_init_lr_raw" "$train_lr")"
 
-    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_ts${total_steps}_ckpt${save_step_freq}_valee${val_ee_freq}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}_ns$(echo $num_seqs | tr -d '[]')_r${lora_rank}_a${lora_alpha}"
+    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_ts${total_steps}_ckpt${save_step_freq}_valee${val_ee_freq}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}_ns$(echo $num_seqs | tr -d '[]')_r${lora_rank}_a${lora_alpha}_ltm${ltm_idx}"
     local lr_code
     local warmup_code
     local total_code
@@ -206,14 +223,14 @@ submit_job() {
         val_code="$val_ee_freq"
     fi
 
-    job_name="d3l${lr_code}w${warmup_code}t${total_code}s${save_code}v${val_code}e${lr_end_code}i${warmup_init_code}${lora_code}"
+    job_name="d3l${lr_code}w${warmup_code}t${total_code}s${save_code}v${val_code}e${lr_end_code}i${warmup_init_code}${lora_code}m${ltm_idx}"
     job_name=$(echo "$job_name" | cut -c1-15)
 
     if [[ "$DRY_RUN" == "1" ]]; then
         if [[ "$SCHEDULER_TYPE" == "pbs" ]]; then
-            echo "[DRY_RUN] qsub -N ${job_name} for ${run_name} with lora.enable=${lora_enable} num_seqs=${num_seqs} lora_rank=${lora_rank} lora_alpha=${lora_alpha}"
+            echo "[DRY_RUN] qsub -N ${job_name} for ${run_name} with lora.enable=${lora_enable} num_seqs=${num_seqs} lora_rank=${lora_rank} lora_alpha=${lora_alpha} lora_target_module=${lora_target_module}"
         else
-            echo "[DRY_RUN] sbatch --job-name=${job_name} for ${run_name} with lora.enable=${lora_enable} num_seqs=${num_seqs} lora_rank=${lora_rank} lora_alpha=${lora_alpha}"
+            echo "[DRY_RUN] sbatch --job-name=${job_name} for ${run_name} with lora.enable=${lora_enable} num_seqs=${num_seqs} lora_rank=${lora_rank} lora_alpha=${lora_alpha} lora_target_module=${lora_target_module}"
         fi
         return 0
     fi
@@ -288,7 +305,8 @@ cd "\$DATADIR"
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
     model.lora.enable=${lora_enable} \
     model.lora.lora_rank=${lora_rank} \
-    model.lora.lora_alpha=${lora_alpha}
+    model.lora.lora_alpha=${lora_alpha} \
+    model.lora.lora_target_module="'${lora_target_module}'"
 
 cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 
@@ -369,7 +387,8 @@ cd "\$DATADIR"
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
     model.lora.enable=${lora_enable} \
     model.lora.lora_rank=${lora_rank} \
-    model.lora.lora_alpha=${lora_alpha}
+    model.lora.lora_alpha=${lora_alpha} \
+    model.lora.lora_target_module="'${lora_target_module}'"
 
 cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 
@@ -393,8 +412,16 @@ for train_lr in "${TRAIN_LR_VALUES[@]}"; do
                                 for num_seqs in "${NUM_SEQS_VALUES[@]}"; do
                                     for lora_rank in "${LORA_RANK_VALUES[@]}"; do
                                         for lora_alpha in "${LORA_ALPHA_VALUES[@]}"; do
-                                            submit_job "$train_lr" "$warmup_steps" "$total_steps" "$save_step_freq" "$val_ee_freq" "$lr_end" "$warmup_init_lr" "$lora_enable" "$num_seqs" "$lora_rank" "$lora_alpha"
-                                            total=$((total + 1))
+                                            for ltm_idx in "${!LORA_TARGET_MODULE_VALUES[@]}"; do
+                                                lora_target_module="${LORA_TARGET_MODULE_VALUES[$ltm_idx]}"
+                                                if [[ "${#LORA_TARGET_MODULE_LABELS_VALUES[@]}" -gt 0 ]]; then
+                                                    ltm_token="${LORA_TARGET_MODULE_LABELS_VALUES[$ltm_idx]}"
+                                                else
+                                                    ltm_token="$ltm_idx"
+                                                fi
+                                                submit_job "$train_lr" "$warmup_steps" "$total_steps" "$save_step_freq" "$val_ee_freq" "$lr_end" "$warmup_init_lr" "$lora_enable" "$num_seqs" "$lora_rank" "$lora_alpha" "$lora_target_module" "$ltm_token"
+                                                total=$((total + 1))
+                                            done
                                         done
                                     done
                                 done
