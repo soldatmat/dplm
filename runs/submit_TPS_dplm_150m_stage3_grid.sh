@@ -47,9 +47,13 @@ WARMUP_STEPS_LIST="${WARMUP_STEPS_LIST:-2000}"
 TOTAL_STEPS_LIST="${TOTAL_STEPS_LIST:-200000}" # controls both lr_scheduler and length of training
 SAVE_STEP_FREQ_LIST="${SAVE_STEP_FREQ_LIST:-10000}"
 VAL_EE_FREQ_LIST="${VAL_EE_FREQ_LIST:-10000}"
+NUM_SEQS_LIST="${NUM_SEQS_LIST:-[50]}"
 LR_END_LIST="${LR_END_LIST:-1e-1*tlr}"
 WARMUP_INIT_LR_LIST="${WARMUP_INIT_LR_LIST:-1e-3*tlr}"
+
 LORA_ENABLE_LIST="${LORA_ENABLE_LIST:-true}"
+LORA_RANK_LIST="${LORA_RANK_LIST:-1}"
+LORA_ALPHA_LIST="${LORA_ALPHA_LIST:-2}"
 
 DEFAULT_RESOURCE_SPEC=""
 
@@ -99,7 +103,14 @@ read -r -a VAL_EE_FREQ_VALUES <<< "$VAL_EE_FREQ_LIST"
 # Supports absolute values (e.g. 1e-6) and relative values (e.g. 1e-1*tlr).
 read -r -a LR_END_VALUES <<< "$LR_END_LIST"
 read -r -a WARMUP_INIT_LR_VALUES <<< "$WARMUP_INIT_LR_LIST"
+
 read -r -a LORA_ENABLE_VALUES <<< "$LORA_ENABLE_LIST"
+
+# Read NUM_SEQS_LIST as space-separated values (e.g., "[50] [150]")
+read -r -a NUM_SEQS_VALUES <<< "$NUM_SEQS_LIST"
+# Read LoRA rank and alpha lists
+read -r -a LORA_RANK_VALUES <<< "$LORA_RANK_LIST"
+read -r -a LORA_ALPHA_VALUES <<< "$LORA_ALPHA_LIST"
 
 # -------------------------
 # Script Logic
@@ -139,6 +150,8 @@ resolve_lr_value() {
 
 
 
+
+
 submit_job() {
     local train_lr="$1"
     local warmup_steps="$2"
@@ -148,13 +161,16 @@ submit_job() {
     local lr_end_raw="$6"
     local warmup_init_lr_raw="$7"
     local lora_enable="$8"
+    local num_seqs="$9"
+    local lora_rank="${10}"
+    local lora_alpha="${11}"
     local lr_end
     local warmup_init_lr
 
     lr_end="$(resolve_lr_value "$lr_end_raw" "$train_lr")"
     warmup_init_lr="$(resolve_lr_value "$warmup_init_lr_raw" "$train_lr")"
 
-    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_ts${total_steps}_ckpt${save_step_freq}_valee${val_ee_freq}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}"
+    local run_name="${RUN_PREFIX}_lr$(sanitize_float "$train_lr")_wu${warmup_steps}_ts${total_steps}_ckpt${save_step_freq}_valee${val_ee_freq}_lend$(sanitize_float "$lr_end")_winit$(sanitize_float "$warmup_init_lr")_lora${lora_enable}_ns$(echo $num_seqs | tr -d '[]')_r${lora_rank}_a${lora_alpha}"
     local lr_code
     local warmup_code
     local total_code
@@ -195,9 +211,9 @@ submit_job() {
 
     if [[ "$DRY_RUN" == "1" ]]; then
         if [[ "$SCHEDULER_TYPE" == "pbs" ]]; then
-            echo "[DRY_RUN] qsub -N ${job_name} for ${run_name} with lora.enable=${lora_enable}"
+            echo "[DRY_RUN] qsub -N ${job_name} for ${run_name} with lora.enable=${lora_enable} num_seqs=${num_seqs} lora_rank=${lora_rank} lora_alpha=${lora_alpha}"
         else
-            echo "[DRY_RUN] sbatch --job-name=${job_name} for ${run_name} with lora.enable=${lora_enable}"
+            echo "[DRY_RUN] sbatch --job-name=${job_name} for ${run_name} with lora.enable=${lora_enable} num_seqs=${num_seqs} lora_rank=${lora_rank} lora_alpha=${lora_alpha}"
         fi
         return 0
     fi
@@ -255,6 +271,7 @@ fi
 
 cd "\$DATADIR"
 
+
 "\${PY_RUNNER[@]}" python train.py \
     experiment=\${exp} \
     name=\${run_name} \
@@ -266,9 +283,12 @@ cd "\$DATADIR"
     trainer.max_steps=${total_steps} \
     callbacks.checkpoint_every_n_steps.save_step_frequency=${save_step_freq} \
     callbacks.validate_with_enzyme_explorer.every_n_train_steps=${val_ee_freq} \
+    callbacks.validate_with_enzyme_explorer.num_seqs=${num_seqs} \
     task.lr_scheduler.lr_end=${lr_end} \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
-    model.lora.enable=${lora_enable}
+    model.lora.enable=${lora_enable} \
+    model.lora.lora_rank=${lora_rank} \
+    model.lora.lora_alpha=${lora_alpha}
 
 cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 
@@ -344,9 +364,12 @@ cd "\$DATADIR"
     trainer.max_steps=${total_steps} \
     callbacks.checkpoint_every_n_steps.save_step_frequency=${save_step_freq} \
     callbacks.validate_with_enzyme_explorer.every_n_train_steps=${val_ee_freq} \
+    callbacks.validate_with_enzyme_explorer.num_seqs=${num_seqs} \
     task.lr_scheduler.lr_end=${lr_end} \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
-    model.lora.enable=${lora_enable}
+    model.lora.enable=${lora_enable} \
+    model.lora.lora_rank=${lora_rank} \
+    model.lora.lora_alpha=${lora_alpha}
 
 cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 
@@ -358,6 +381,7 @@ EOF
 }
 
 total=0
+
 for train_lr in "${TRAIN_LR_VALUES[@]}"; do
     for warmup_steps in "${WARMUP_STEPS_VALUES[@]}"; do
         for total_steps in "${TOTAL_STEPS_VALUES[@]}"; do
@@ -366,8 +390,14 @@ for train_lr in "${TRAIN_LR_VALUES[@]}"; do
                     for lr_end in "${LR_END_VALUES[@]}"; do
                         for warmup_init_lr in "${WARMUP_INIT_LR_VALUES[@]}"; do
                             for lora_enable in "${LORA_ENABLE_VALUES[@]}"; do
-                                submit_job "$train_lr" "$warmup_steps" "$total_steps" "$save_step_freq" "$val_ee_freq" "$lr_end" "$warmup_init_lr" "$lora_enable"
-                                total=$((total + 1))
+                                for num_seqs in "${NUM_SEQS_VALUES[@]}"; do
+                                    for lora_rank in "${LORA_RANK_VALUES[@]}"; do
+                                        for lora_alpha in "${LORA_ALPHA_VALUES[@]}"; do
+                                            submit_job "$train_lr" "$warmup_steps" "$total_steps" "$save_step_freq" "$val_ee_freq" "$lr_end" "$warmup_init_lr" "$lora_enable" "$num_seqs" "$lora_rank" "$lora_alpha"
+                                            total=$((total + 1))
+                                        done
+                                    done
+                                done
                             done
                         done
                     done
