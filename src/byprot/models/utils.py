@@ -7,6 +7,9 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import logging
+log = logging.getLogger(__name__)
+
 import torch
 import torch.nn as nn
 from huggingface_hub import snapshot_download
@@ -105,6 +108,10 @@ def get_net(cfg):
             lora_dropout=cfg.lora.lora_dropout,
         )
         net = get_peft_model(net, peft_config)
+        trainable_params, all_param = net.get_nb_trainable_parameters()
+        log.info(
+            f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param:.4f}"
+        )
 
     return net
 
