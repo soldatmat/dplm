@@ -56,6 +56,22 @@ train:
   # an exact merge; otherwise scaling=1 is used and a warning is logged.
   init_weights_merge_lora: auto
 
+  # Source-architecture shortcut for init_weights_from: rewrites source state_dict
+  # key prefixes so a checkpoint trained for one architecture can seed a different
+  # one. Recognized values:
+  #   null/none/self - no remap (default; both sides use the same architecture).
+  #   dplm           - source is a vanilla DPLM ckpt (`model.net.*`); target is a
+  #                    DPLMClass arch (`model.decoder.net.*`). Rewrites the prefix
+  #                    so the ESM stack transfers; ClassEncoder, conditional
+  #                    adapter layers, and any fresh LoRA slots stay at default
+  #                    init. Combine with init_weights_merge_lora as needed.
+  init_weights_source_arch: null
+
+  # Power-user escape hatch: explicit dict mapping source-key prefixes to target
+  # prefixes (longest-prefix match). Overrides init_weights_source_arch when set.
+  # Hydra dict syntax: train.init_weights_key_remap='{model.net.: model.decoder.net.}'
+  init_weights_key_remap: null
+
   seed: 42 # seed for random number generators in pytorch, numpy and python.random
 
   lr: 1e-3 # learning rate

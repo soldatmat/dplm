@@ -36,6 +36,11 @@ validate_with_enzyme_explorer:
   # class_id_column_name: "First_cyclization_product_id" # template mode only
   num_seqs: [50] # explicit mode only
   seq_lens: [350] # explicit mode only
+  # class_ids is paired 1:1 with (num_seqs, seq_lens) entries (length 1 or
+  # len(seq_lens)). Required for DPLMClass (class-conditional) models;
+  # ignored by unconditional models (e.g. vanilla DPLM). Default null forces
+  # an explicit per-run choice -- DPLMClass generation will error otherwise.
+  class_ids: null # explicit mode only; e.g. class_ids: [0]
   enzymeexplorer_checkpoint_dir: ${paths.root_dir}/data-bin/checkpoints/enzymeexplorer
   saveto: ${paths.log_dir}/enzyme_explorer_validation
   max_iter: 500

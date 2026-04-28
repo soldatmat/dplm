@@ -29,16 +29,25 @@ SCHEDULER_RESOURCE_SPEC="${SCHEDULER_RESOURCE_SPEC:-}"
 JOB_NODES="${JOB_NODES:-1}"
 JOB_NCPUS="${JOB_NCPUS:-1}"
 JOB_NGPUS="${JOB_NGPUS:-1}"
+JOB_ACCOUNT="${JOB_ACCOUNT:-fta-26-15}"
+JOB_PARTITION="${JOB_PARTITION:-qgpu}"
 JOB_GPU_MEM="${JOB_GPU_MEM:-46gb}"
 JOB_MEM_PBS="${JOB_MEM_PBS:-64gb}"
 JOB_MEM_SLURM="${JOB_MEM_SLURM:-64G}"
 JOB_SCRATCH_LOCAL="${JOB_SCRATCH_LOCAL:-40gb}"
 JOB_WALLTIME="${JOB_WALLTIME:-72:00:00}"
+if [[ "$CLUSTER" == "karolina" ]]; then
+    TRAIN_ENV="${TRAIN_ENV:-/mnt/proj2/fta-26-15/.conda/envs/dplm}"
+else
+    TRAIN_ENV="${TRAIN_ENV:-/storage/brno2/home/soldatmat/.conda/envs/dplm}"
+fi
 
 TRAIN_LR_LIST="${TRAIN_LR_LIST:-1e-2 1e-4}"
 WARMUP_STEPS_LIST="${WARMUP_STEPS_LIST:-4000}"
 WARMUP_INIT_LR_LIST="${WARMUP_INIT_LR_LIST:-1e-4*tlr}"
 LORA_ENABLE_LIST="${LORA_ENABLE_LIST:-true}"
+
+EXTRA_OVERRIDES="${EXTRA_OVERRIDES:-}"
 
 DEFAULT_RESOURCE_SPEC=""
 
@@ -57,7 +66,9 @@ if [[ "$CLUSTER" == "metacentrum" ]]; then
 elif [[ "$CLUSTER" == "karolina" ]]; then
     SCHEDULER_TYPE="${SCHEDULER_TYPE:-slurm}"
     # Karolina typically uses Slurm. Override as needed for your partition/QoS.
-    printf -v DEFAULT_RESOURCE_SPEC '%s\n%s\n%s\n%s\n%s' \
+    printf -v DEFAULT_RESOURCE_SPEC '%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+        "#SBATCH -A ${JOB_ACCOUNT}" \
+        "#SBATCH --partition=${JOB_PARTITION}" \
         "#SBATCH --nodes=${JOB_NODES}" \
         "#SBATCH --gres=gpu:${JOB_NGPUS}" \
         "#SBATCH --cpus-per-task=${JOB_NCPUS}" \
@@ -185,12 +196,29 @@ export TMPDIR="\$work_scratch/tmp"
 mkdir -p "\$work_scratch/dplm"
 cp -r "\$DATADIR/data-bin" "\$work_scratch/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }
 
-module add mambaforge
-mamba activate /storage/brno2/home/soldatmat/.conda/envs/dplm
+module add mambaforge >/dev/null 2>&1 || true
+ml Anaconda3 >/dev/null 2>&1 || true
+
+if command -v conda >/dev/null 2>&1; then
+    if [[ "$TRAIN_ENV" == /* ]]; then
+        PY_RUNNER=(conda run --no-capture-output -p "$TRAIN_ENV")
+    else
+        PY_RUNNER=(conda run --no-capture-output -n "$TRAIN_ENV")
+    fi
+elif command -v mamba >/dev/null 2>&1; then
+    if [[ "$TRAIN_ENV" == /* ]]; then
+        PY_RUNNER=(mamba run --no-capture-output -p "$TRAIN_ENV")
+    else
+        PY_RUNNER=(mamba run --no-capture-output -n "$TRAIN_ENV")
+    fi
+else
+    echo >&2 "Neither conda nor mamba is available after module setup."
+    exit 3
+fi
 
 cd "\$DATADIR"
 
-python train.py \
+"\${PY_RUNNER[@]}" python train.py \
     experiment=\${exp} \
     name=\${run_name} \
     paths.data_dir=\$work_scratch/dplm/data-bin \
@@ -198,7 +226,8 @@ python train.py \
     train.lr=${train_lr} \
     task.lr_scheduler.warmup_steps=${warmup_steps} \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
-    model.decoder.lora.enable=${lora_enable}
+    model.decoder.lora.enable=${lora_enable} \
+    ${EXTRA_OVERRIDES}
 
 cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 
@@ -207,7 +236,11 @@ if command -v clean_scratch >/dev/null 2>&1; then
 fi
 EOF
     else
-        sbatch --job-name="$job_name" <<EOF
+        mkdir -p "$DATADIR/logs/${run_name}"
+        sbatch \
+            --job-name="$job_name" \
+            --output="$DATADIR/logs/${run_name}/slurm-%j.out" \
+            --error="$DATADIR/logs/${run_name}/slurm-%j.err" <<EOF
 #!/bin/bash
 ${SCHEDULER_RESOURCE_SPEC}
 
@@ -236,12 +269,29 @@ export TMPDIR="\$work_scratch/tmp"
 mkdir -p "\$work_scratch/dplm"
 cp -r "\$DATADIR/data-bin" "\$work_scratch/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }
 
-module add mambaforge
-mamba activate /storage/brno2/home/soldatmat/.conda/envs/dplm
+module add mambaforge >/dev/null 2>&1 || true
+ml Anaconda3 >/dev/null 2>&1 || true
+
+if command -v conda >/dev/null 2>&1; then
+    if [[ "$TRAIN_ENV" == /* ]]; then
+        PY_RUNNER=(conda run --no-capture-output -p "$TRAIN_ENV")
+    else
+        PY_RUNNER=(conda run --no-capture-output -n "$TRAIN_ENV")
+    fi
+elif command -v mamba >/dev/null 2>&1; then
+    if [[ "$TRAIN_ENV" == /* ]]; then
+        PY_RUNNER=(mamba run --no-capture-output -p "$TRAIN_ENV")
+    else
+        PY_RUNNER=(mamba run --no-capture-output -n "$TRAIN_ENV")
+    fi
+else
+    echo >&2 "Neither conda nor mamba is available after module setup."
+    exit 3
+fi
 
 cd "\$DATADIR"
 
-python train.py \
+"\${PY_RUNNER[@]}" python train.py \
     experiment=\${exp} \
     name=\${run_name} \
     paths.data_dir=\$work_scratch/dplm/data-bin \
@@ -249,7 +299,8 @@ python train.py \
     train.lr=${train_lr} \
     task.lr_scheduler.warmup_steps=${warmup_steps} \
     task.lr_scheduler.warmup_init_lr=${warmup_init_lr} \
-    model.decoder.lora.enable=${lora_enable}
+    model.decoder.lora.enable=${lora_enable} \
+    ${EXTRA_OVERRIDES}
 
 cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 

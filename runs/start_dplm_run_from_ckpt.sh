@@ -25,6 +25,13 @@
 #     LoRA delta is folded into base_layer.weight at load time using
 #     alpha/rank read from the ckpt's hyper_parameters. Set merge_lora=never
 #     in EXTRA_OVERRIDES to get the unmerged base weights only (deltas dropped).
+#   - Vanilla DPLM ckpt -> altered DPLMClass arch (class_first / class_mini /
+#     class_prepend): set train.init_weights_source_arch=dplm. That rewrites
+#     source 'model.net.*' keys to 'model.decoder.net.*' so the ESM stack
+#     transfers; the new ClassEncoder, conditional adapter layers (e.g.
+#     adapter_crossattention) and any fresh LoRA slots stay at default init.
+#     For an arbitrary remap, pass train.init_weights_key_remap='{src.: dst.}'
+#     (Hydra dict syntax) instead.
 #
 # Karolina (Slurm):
 #     sbatch runs/start_dplm_run_from_ckpt.sh

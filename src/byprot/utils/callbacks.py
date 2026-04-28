@@ -371,8 +371,8 @@ class TrackNorms(pl.Callback):
 
 class ValidateWithEnzymeExplorer(pl.Callback):
     @staticmethod
-    def _normalize_positive_int_list(
-        value: Union[int, List[int]], field_name: str
+    def _normalize_int_list(
+        value: Union[int, List[int]], field_name: str, min_value: int = 1
     ) -> List[int]:
         if isinstance(value, bool):
             raise TypeError(f"{field_name} must be an int or a list of ints")
@@ -395,9 +395,15 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         else:
             raise TypeError(f"{field_name} must be an int or a list of ints")
 
-        if any(v <= 0 for v in normalized):
-            raise ValueError(f"{field_name} values must be > 0")
+        if any(v < min_value for v in normalized):
+            raise ValueError(f"{field_name} values must be >= {min_value}")
         return normalized
+
+    @classmethod
+    def _normalize_positive_int_list(
+        cls, value: Union[int, List[int]], field_name: str
+    ) -> List[int]:
+        return cls._normalize_int_list(value, field_name, min_value=1)
 
     def __init__(
         self,
@@ -407,6 +413,7 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         class_id_column_name: str = None,
         num_seqs: Optional[Union[int, List[int]]] = None,
         seq_lens: Optional[Union[int, List[int]]] = None,
+        class_ids: Optional[Union[int, List[int]]] = None,
         max_iter: int = 500,
         sampling_strategy: str = "gumbel_argmax",
         temperature: float = 1.0,
@@ -425,10 +432,13 @@ class ValidateWithEnzymeExplorer(pl.Callback):
         self.generation_batch_lens_together = generation_batch_lens_together
 
         if template_sequences_file is not None and (
-            num_seqs is not None or seq_lens is not None
+            num_seqs is not None
+            or seq_lens is not None
+            or class_ids is not None
         ):
             raise ValueError(
-                "Provide either template_sequences_file or both num_seqs and seq_lens, not both"
+                "Provide either template_sequences_file or explicit "
+                "(num_seqs, seq_lens[, class_ids]), not both"
             )
 
         if template_sequences_file is None and (
@@ -477,15 +487,26 @@ class ValidateWithEnzymeExplorer(pl.Callback):
                 raise ValueError(
                     "num_seqs must have length 1 or match seq_lens length"
                 )
-            self.class_ids = None
+            if class_ids is not None:
+                # class_ids 0..n_classes-1 are all valid, so allow zero.
+                self.class_ids = self._normalize_int_list(
+                    class_ids, "class_ids", min_value=0
+                )
+                if len(self.class_ids) not in {1, len(self.seq_lens)}:
+                    raise ValueError(
+                        "class_ids must have length 1 or match seq_lens length"
+                    )
+            else:
+                self.class_ids = None
             if class_id_column_name is not None:
                 logger.warning(
                     "class_id_column_name is ignored when template_sequences_file is not provided"
                 )
             logger.info(
-                "ValidateWithEnzymeExplorer explicit generation plan: num_seqs=%s, seq_lens=%s",
+                "ValidateWithEnzymeExplorer explicit generation plan: num_seqs=%s, seq_lens=%s, class_ids=%s",
                 self.num_seqs,
                 self.seq_lens,
+                self.class_ids,
             )
 
         logger.info(

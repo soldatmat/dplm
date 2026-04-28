@@ -68,10 +68,32 @@ def train(config: DictConfig) -> Optional[float]:
         else:
             from byprot.models.utils import init_weights_from_checkpoint
 
+            # Resolve key remap. Explicit train.init_weights_key_remap wins;
+            # otherwise train.init_weights_source_arch picks a known table for
+            # crossing architecture families (e.g. vanilla DPLM -> DPLMClass).
+            key_remap_cfg = config.train.get("init_weights_key_remap", None)
+            if key_remap_cfg is not None:
+                source_key_prefix_map = dict(key_remap_cfg)
+            else:
+                source_arch = config.train.get("init_weights_source_arch", None)
+                _ARCH_REMAPS = {
+                    None: None,
+                    "none": None,
+                    "self": None,
+                    "dplm": {"model.net.": "model.decoder.net."},
+                }
+                if source_arch not in _ARCH_REMAPS:
+                    raise ValueError(
+                        f"Unknown train.init_weights_source_arch={source_arch!r}. "
+                        f"Known: {sorted(k for k in _ARCH_REMAPS if k)}"
+                    )
+                source_key_prefix_map = _ARCH_REMAPS[source_arch]
+
             init_weights_from_checkpoint(
                 pl_module,
                 init_weights_from,
                 merge_lora_mode=config.train.get("init_weights_merge_lora", "auto"),
+                source_key_prefix_map=source_key_prefix_map,
             )
 
     # Init lightning trainer

@@ -6,6 +6,7 @@ import importlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Dict, Optional
 
 import logging
 log = logging.getLogger(__name__)
@@ -398,6 +399,7 @@ def init_weights_from_checkpoint(
     pl_module: nn.Module,
     ckpt_path: str,
     merge_lora_mode: str = "auto",
+    source_key_prefix_map: Optional[Dict[str, str]] = None,
 ) -> None:
     """Load only the model state_dict from a checkpoint into ``pl_module``.
 
@@ -409,6 +411,14 @@ def init_weights_from_checkpoint(
     parameter from '.weight'/'.bias' to '.base_layer.weight'/'.base_layer.bias'.
     Both decorations are stripped to a canonical key so the source values land
     in matching target slots regardless of which side has LoRA.
+
+    ``source_key_prefix_map`` lets callers reshape source keys before any
+    matching, so that a vanilla checkpoint can seed a different architecture
+    that places the same weights under a different namespace (e.g. starting an
+    altered DPLMClass arch from a vanilla DPLM ckpt: ``model.net.`` ->
+    ``model.decoder.net.``). Keys are rewritten by longest-prefix match; keys
+    matching no prefix are left as-is and (after norm) either land in the
+    target or are reported as unmapped. Order of the dict does not matter.
 
     ``merge_lora_mode`` controls source LoRA deltas (lora_A / lora_B):
         "auto"   - fold into base_layer.weight only when target lacks the
@@ -429,6 +439,28 @@ def init_weights_from_checkpoint(
     )
     blob = torch.load(ckpt_path, map_location="cpu")
     state_dict = blob["state_dict"] if isinstance(blob, dict) and "state_dict" in blob else blob
+
+    if source_key_prefix_map:
+        # Sort by length desc so longest-prefix wins when prefixes overlap.
+        prefix_pairs = sorted(
+            source_key_prefix_map.items(), key=lambda kv: len(kv[0]), reverse=True
+        )
+
+        def _remap(k: str) -> str:
+            for src_prefix, dst_prefix in prefix_pairs:
+                if k.startswith(src_prefix):
+                    return dst_prefix + k[len(src_prefix):]
+            return k
+
+        remapped = {}
+        for k, v in state_dict.items():
+            remapped[_remap(k)] = v
+        rewritten = sum(1 for k in state_dict if _remap(k) != k)
+        log.info(
+            f"Init from ckpt: source_key_prefix_map rewrote {rewritten}/{len(state_dict)} keys "
+            f"(map={dict(prefix_pairs)})"
+        )
+        state_dict = remapped
 
     def _norm(k: str) -> str:
         return k.replace(".base_model.model.", ".").replace(".base_layer.", ".")
