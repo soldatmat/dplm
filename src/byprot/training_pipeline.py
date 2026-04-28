@@ -54,8 +54,25 @@ def train(config: DictConfig) -> Optional[float]:
             )
             ckpt_path = None
 
+    init_weights_from = config.train.get("init_weights_from", None)
+
     # loading pipeline
     datamodule, pl_module, logger, callbacks = utils.common_pipeline(config)
+
+    if init_weights_from:
+        if ckpt_path:
+            log.warning(
+                f"Both train.ckpt_path and train.init_weights_from are set. "
+                f"ckpt_path takes precedence (full resume); init_weights_from is ignored."
+            )
+        else:
+            from byprot.models.utils import init_weights_from_checkpoint
+
+            init_weights_from_checkpoint(
+                pl_module,
+                init_weights_from,
+                merge_lora_mode=config.train.get("init_weights_merge_lora", "auto"),
+            )
 
     # Init lightning trainer
     log.info(f"Instantiating trainer <{config.trainer._target_}>")

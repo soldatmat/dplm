@@ -394,6 +394,153 @@ def top_k_top_p_filtering(
     return logits
 
 
+def init_weights_from_checkpoint(
+    pl_module: nn.Module,
+    ckpt_path: str,
+    merge_lora_mode: str = "auto",
+) -> None:
+    """Load only the model state_dict from a checkpoint into ``pl_module``.
+
+    Optimizer / LR scheduler / global_step / epoch are NOT touched -- use
+    ``Trainer.fit(ckpt_path=...)`` for a full resume.
+
+    Source and target may have different LoRA topology. PEFT wraps modules
+    with a 'base_model.model.' prefix and renames each wrapped Linear's
+    parameter from '.weight'/'.bias' to '.base_layer.weight'/'.base_layer.bias'.
+    Both decorations are stripped to a canonical key so the source values land
+    in matching target slots regardless of which side has LoRA.
+
+    ``merge_lora_mode`` controls source LoRA deltas (lora_A / lora_B):
+        "auto"   - fold into base_layer.weight only when target lacks the
+                   matching LoRA slot for that module (different rank or LoRA
+                   disabled). When the target has the matching slot, A and B
+                   load independently. (default)
+        "always" - always fold A and B into base_layer.weight; target's LoRA
+                   stays at fresh init even when slots match.
+        "never"  - never fold; A and B load only when target has matching
+                   slots, otherwise their info is dropped silently.
+    Folding uses ``alpha/rank`` from the checkpoint's
+    ``hyper_parameters.model.lora.lora_alpha``; a scaling=1 fallback is used
+    with a warning if it is missing.
+    """
+    log.info(
+        f"Loading model weights from <{ckpt_path}> "
+        f"(weights only; optimizer / LR scheduler / global_step start fresh)"
+    )
+    blob = torch.load(ckpt_path, map_location="cpu")
+    state_dict = blob["state_dict"] if isinstance(blob, dict) and "state_dict" in blob else blob
+
+    def _norm(k: str) -> str:
+        return k.replace(".base_model.model.", ".").replace(".base_layer.", ".")
+
+    src_norm = {_norm(k): v for k, v in state_dict.items()}
+    target_sd = pl_module.state_dict()
+    target_canon = {_norm(k): k for k in target_sd}
+
+    merge_mode = str(merge_lora_mode)
+    lora_modules = sorted({
+        ck[: -len(".lora_A.default.weight")]
+        for ck in src_norm
+        if ck.endswith(".lora_A.default.weight")
+    })
+
+    hp_lora = (((blob.get("hyper_parameters", {}) if isinstance(blob, dict) else {})
+                .get("model", {}) or {})
+               .get("lora", {}) or {})
+    src_alpha = hp_lora.get("lora_alpha")
+
+    merged_modules = []
+    merged_canonical_keys = set()
+    alpha_fallback_used = False
+    sample_delta_norm = None
+    sample_base_norm = None
+    for m in lora_modules:
+        cA, cB, cW = (
+            f"{m}.lora_A.default.weight",
+            f"{m}.lora_B.default.weight",
+            f"{m}.weight",
+        )
+        A, B, W = src_norm.get(cA), src_norm.get(cB), src_norm.get(cW)
+        if A is None or B is None or W is None:
+            continue
+
+        if merge_mode == "never":
+            continue
+        if merge_mode == "auto":
+            tA, tB = target_canon.get(cA), target_canon.get(cB)
+            target_lora_matches = (
+                tA is not None and tB is not None
+                and target_sd[tA].shape == A.shape
+                and target_sd[tB].shape == B.shape
+            )
+            if target_lora_matches:
+                continue  # let A/B load into target slots; don't merge
+
+        rank = A.shape[0]
+        if src_alpha is None:
+            alpha = rank  # scaling = 1.0 fallback
+            alpha_fallback_used = True
+        else:
+            alpha = src_alpha
+        scaling = float(alpha) / float(rank)
+        delta = torch.matmul(B.float(), A.float()) * scaling
+        merged = (W.float() + delta).to(W.dtype)
+        if sample_delta_norm is None:
+            sample_delta_norm = float(delta.norm().item())
+            sample_base_norm = float(W.float().norm().item())
+        src_norm[cW] = merged
+        src_norm.pop(cA, None)
+        src_norm.pop(cB, None)
+        merged_modules.append(m)
+        merged_canonical_keys.update({cA, cB})
+
+    new_sd = {}
+    shape_mismatch = []
+    for tk, tv in target_sd.items():
+        sv = src_norm.get(_norm(tk))
+        if sv is None:
+            continue
+        if sv.shape != tv.shape:
+            shape_mismatch.append(tk)
+            continue
+        new_sd[tk] = sv
+
+    target_norm = set(target_canon.keys())
+    src_unmapped = [
+        k for k in state_dict
+        if _norm(k) not in target_norm and _norm(k) not in merged_canonical_keys
+    ]
+
+    missing, unexpected = pl_module.load_state_dict(new_sd, strict=False)
+    log.info(
+        f"Init from ckpt: matched {len(new_sd)} target slots; "
+        f"merged LoRA into base for {len(merged_modules)} module(s) "
+        f"(merge_mode={merge_mode}, alpha={src_alpha}); "
+        f"{len(src_unmapped)} source keys dropped (no target slot); "
+        f"{len(shape_mismatch)} keys had shape mismatch; "
+        f"{len(missing)} target keys remain unfilled (e.g. fresh LoRA params); "
+        f"{len(unexpected)} unexpected (should be 0)."
+    )
+    if merged_modules and sample_delta_norm is not None:
+        log.info(
+            f"LoRA merge sanity: first merged module {merged_modules[0]} -> "
+            f"||delta||={sample_delta_norm:.4g}, ||base||={sample_base_norm:.4g}"
+        )
+    if alpha_fallback_used:
+        log.warning(
+            "lora_alpha not found in ckpt's hyper_parameters; "
+            "used scaling=alpha/rank=1.0 as fallback for at least one merged module."
+        )
+    if shape_mismatch:
+        log.warning(f"Shape mismatch (first 5): {shape_mismatch[:5]}")
+    if src_unmapped:
+        log.warning(f"Source keys dropped (first 5): {src_unmapped[:5]}")
+    if missing:
+        log.warning(f"Unfilled target keys (first 5): {missing[:5]}")
+    if unexpected:
+        log.warning(f"Unexpected keys (first 5): {unexpected[:5]}")
+
+
 def get_struct_tokenizer(
     model_name_or_path="airkingbd/struct_tokenizer", eval_mode=True
 ):

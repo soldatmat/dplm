@@ -34,6 +34,28 @@ train:
   # 2) checkpoint directory (${paths.ckpt_dir})
   ckpt_path: last.ckpt
 
+  # Load only the model state_dict from a checkpoint (no optimizer / LR scheduler
+  # / global_step / epoch). Useful for fine-tuning from a prior run with fresh
+  # optimization state and possibly different model topology (e.g. different LoRA
+  # target modules). Keys are matched after stripping PEFT decorations
+  # ('base_model.model.' prefix and '.base_layer.') so source/target may differ
+  # in LoRA topology. Ignored if ckpt_path is set (which does a full resume).
+  init_weights_from: null
+
+  # How to handle source LoRA deltas (lora_A / lora_B) when loading via
+  # init_weights_from:
+  #   auto   - fold them into base_layer.weight only when the target has no
+  #            matching LoRA slot for that module (different rank, or LoRA
+  #            disabled). When the target has the matching slot, A and B load
+  #            independently. (default)
+  #   always - always fold A and B into base_layer.weight; target's LoRA stays
+  #            at fresh init even when its slots match the source.
+  #   never  - never fold; A and B load only when the target has matching slots,
+  #            otherwise their info is dropped silently.
+  # Requires the source ckpt to have hyper_parameters.model.lora.lora_alpha for
+  # an exact merge; otherwise scaling=1 is used and a warning is logged.
+  init_weights_merge_lora: auto
+
   seed: 42 # seed for random number generators in pytorch, numpy and python.random
 
   lr: 1e-3 # learning rate
