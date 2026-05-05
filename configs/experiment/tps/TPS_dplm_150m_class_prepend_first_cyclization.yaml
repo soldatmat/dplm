@@ -43,7 +43,7 @@ model:
     output_logits: ${task.learning.output_encoder_logits}
     embedding_dim: 640 # 512
     n_classes: ${datamodule.n_classes}
-    weight_path: /storage/brno2/home/soldatmat/documents/terpene_synthases/data/MARTS-DB/2025-11-19/embeddings/dplm/150m_stage3_best/TPS_first_cyclization_embeddings_bos_class_mean.pt
+    weight_path: ${paths.data_dir}/MARTS-DB/2026-04-12/embeddings/dplm_150m_stage3_grid_run_41V_step200000/TPS_first_cyclization_embeddings_bos_class_mean.pt
     frozen: true
 
   init_pred_where: true
