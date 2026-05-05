@@ -1,0 +1,19 @@
+{
+  "input_file": "/mnt/proj2/fta-26-15/documents/dplm/data-bin/MARTS-DB/2026-04-12/TPS_sequences.csv",
+  "id_column": "Enzyme_marts_ID",
+  "sequence_column": "Aminoacid_sequence",
+  "class_id_column": "class_ID",
+  "model_name": "/mnt/proj2/fta-26-15/documents/dplm/logs/TPS_dplm_150m_stage3_grid_run_41_lr1em3_wu2000_ts200000_ckpt10000_valee10000_lend0p0001_winit1em06_loratrue_ns50_r1_a2_ltmV/checkpoints/N-Step-Checkpoint_epoch=1709_step=200000.ckpt",
+  "from_huggingface": false,
+  "architecture": "DiffusionProteinLanguageModel",
+  "cache_dir": null,
+  "tokens_per_batch": 4096,
+  "truncation_seq_length": 1022,
+  "nogpu": false,
+  "embedding_type": "mean",
+  "output_dir": "/mnt/proj2/fta-26-15/documents/dplm/data-bin/MARTS-DB/2026-04-12/embeddings/dplm_150m_stage3_grid_run_41V_step200000",
+  "save_as": [
+    "torch",
+    "csv"
+  ]
+}
