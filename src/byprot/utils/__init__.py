@@ -72,6 +72,11 @@ def load_from_experiment(experiment_save_dir, ckpt="best.ckpt"):
     return pl_module, cfg
 
 
+def _csv_unique_count(csv_path: str, column: str) -> int:
+    import pandas as pd
+    return int(pd.read_csv(csv_path, usecols=[column])[column].nunique())
+
+
 def extras(config: DictConfig) -> None:
     """Applies optional utilities, controlled by config flags.
 
@@ -80,8 +85,9 @@ def extras(config: DictConfig) -> None:
     - Rich config printing
     """
     OmegaConf.set_struct(config, False)
+    OmegaConf.register_new_resolver("eval", eval, replace=True)
+    OmegaConf.register_new_resolver("csv_unique_count", _csv_unique_count, replace=True)
     OmegaConf.resolve(config)
-    OmegaConf.register_new_resolver("eval", eval)
 
     # print current git revision sh
     log.info(f"Current git revision hash: {get_git_revision_hash()}")
