@@ -126,10 +126,13 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
             from peft import LoraConfig, TaskType, get_peft_model
 
             lora_target_module = cfg.lora.lora_target_module
-            # PEFT matches modules_to_save by suffix; '' would match every module.
-            modules_to_save = [
-                m for m in getattr(cfg.lora, "modules_to_save", "").split(",") if m
-            ]
+            # Accept either comma-separated string ("a,b,c") or list/ListConfig (["a","b","c"]).
+            # PEFT matches modules_to_save by suffix; '' would match every module, so drop empties.
+            modules_to_save_raw = getattr(cfg.lora, "modules_to_save", "")
+            if isinstance(modules_to_save_raw, str):
+                modules_to_save = [m for m in modules_to_save_raw.split(",") if m]
+            else:
+                modules_to_save = [m for m in modules_to_save_raw if m]
 
             peft_config = LoraConfig(
                 task_type=TaskType.SEQ_2_SEQ_LM,
