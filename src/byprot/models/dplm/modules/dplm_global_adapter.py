@@ -5,6 +5,7 @@
 import math
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import torch
@@ -53,6 +54,12 @@ class DPLMWithGlobalAdapterConfig:
     # the corresponding adapter_* submodules of the new GlobalAdapterLayer
     # whenever shapes match. Set False to keep adapter_* at random init.
     init_adapter_from_orig: bool = field(default=True)
+    # Allowlist of substrings: when non-empty, restrict the freeze loop's
+    # 'all adapter_* trainable' default by additionally freezing every
+    # adapter_* parameter whose name does NOT contain any of these
+    # substrings. Use to fine-tune only a subset of adapter submodules
+    # without LoRA. Default empty: every adapter_* parameter trainable.
+    trainable_adapter_substrings: Any = field(default=None)
 
 
 class DPLMWithConditionalGlobalAdapter(nn.Module):
@@ -115,6 +122,21 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
             for pname, param in dplm_adapter.named_parameters():
                 if "adapter" not in pname:
                     param.requires_grad = False
+            allowlist = getattr(cfg, "trainable_adapter_substrings", None)
+            if allowlist:
+                allowlist = list(allowlist)
+                kept, frozen = 0, 0
+                for pname, param in dplm_adapter.named_parameters():
+                    if "adapter" in pname:
+                        if any(s in pname for s in allowlist):
+                            kept += 1
+                        else:
+                            param.requires_grad = False
+                            frozen += 1
+                logger.info(
+                    f"trainable_adapter_substrings={allowlist}: kept "
+                    f"{kept} adapter_* params trainable, froze {frozen}."
+                )
             if getattr(cfg, "finetune_emb_layer_norm_after", False):
                 dplm_adapter.net.esm.encoder.emb_layer_norm_after.requires_grad_(True)
             if getattr(cfg, "finetune_lm_head", False):
