@@ -20,6 +20,18 @@ PYTHON_BIN="$CONDA_ENV/bin/python"
 INLINE_SEQ_LENS="${INLINE_SEQ_LENS:-}"
 INLINE_NUM_SEQS="${INLINE_NUM_SEQS:-}"
 
+# Cache locations (shared across runs to avoid re-downloads and home-dir issues).
+HF_CACHE_DIR="${HF_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/huggingface}"
+TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/triton}"
+if [[ -n "${HF_CACHE_DIR:-}" ]]; then
+    export HF_HOME="$HF_CACHE_DIR"
+    export HF_HUB_CACHE="$HF_CACHE_DIR/hub"
+    export TRANSFORMERS_CACHE="$HF_CACHE_DIR"
+fi
+if [[ -n "${TRITON_CACHE_DIR:-}" ]]; then
+    export TRITON_CACHE_DIR
+fi
+
 if [[ ! -f "$CHECKPOINT" ]]; then
     echo "Checkpoint not found: $CHECKPOINT" >&2
     exit 1

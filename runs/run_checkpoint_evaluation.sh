@@ -63,6 +63,10 @@ ENZYME_EXPLORER_DETECT_PRECURSOR_SYNTHASES="${ENZYME_EXPLORER_DETECT_PRECURSOR_S
 METACENTRUM_MAMBA_ENV="${METACENTRUM_MAMBA_ENV:-/storage/brno2/home/soldatmat/.conda/envs/dplm}"
 KAROLINA_CONDA_ENV="${KAROLINA_CONDA_ENV:-/mnt/proj2/fta-26-15/.conda/envs/dplm}"
 
+# Cache locations (shared across runs to avoid re-downloads and home-dir issues).
+HF_CACHE_DIR="${HF_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/huggingface}"
+TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/triton}"
+
 DEFAULT_RESOURCE_SPEC=""
 
 resolve_path_under_datadir() {
@@ -272,6 +276,14 @@ fi
 
 mkdir -p "\$work_scratch/tmp"
 export TMPDIR="\$work_scratch/tmp"
+if [[ -n "${HF_CACHE_DIR:-}" ]]; then
+    export HF_HOME="${HF_CACHE_DIR}"
+    export HF_HUB_CACHE="${HF_CACHE_DIR}/hub"
+    export TRANSFORMERS_CACHE="${HF_CACHE_DIR}"
+fi
+if [[ -n "${TRITON_CACHE_DIR:-}" ]]; then
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR}"
+fi
 
 mkdir -p "\$work_scratch/dplm"
 cp -r "$DATADIR/data-bin" "\$work_scratch/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }
@@ -340,6 +352,14 @@ fi
 
 mkdir -p "\$work_scratch/tmp"
 export TMPDIR="\$work_scratch/tmp"
+if [[ -n "${HF_CACHE_DIR:-}" ]]; then
+    export HF_HOME="${HF_CACHE_DIR}"
+    export HF_HUB_CACHE="${HF_CACHE_DIR}/hub"
+    export TRANSFORMERS_CACHE="${HF_CACHE_DIR}"
+fi
+if [[ -n "${TRITON_CACHE_DIR:-}" ]]; then
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR}"
+fi
 
 mkdir -p "\$work_scratch/dplm"
 cp -r "$DATADIR/data-bin" "\$work_scratch/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }

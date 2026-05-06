@@ -61,6 +61,10 @@ DATADIR="${DATADIR:-/mnt/proj2/fta-26-15/documents/dplm}"
 TRAIN_ENV="${TRAIN_ENV:-/mnt/proj2/fta-26-15/.conda/envs/dplm}"
 EXTRA_OVERRIDES="${EXTRA_OVERRIDES:-}"
 
+# Cache locations (shared across runs to avoid re-downloads and home-dir issues).
+HF_CACHE_DIR="${HF_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/huggingface}"
+TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/triton}"
+
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,}"
 
 # ---- Logging & Scratch Setup ----
@@ -85,6 +89,14 @@ fi
 
 mkdir -p "$work_scratch/tmp"
 export TMPDIR="$work_scratch/tmp"
+if [[ -n "${HF_CACHE_DIR:-}" ]]; then
+    export HF_HOME="$HF_CACHE_DIR"
+    export HF_HUB_CACHE="$HF_CACHE_DIR/hub"
+    export TRANSFORMERS_CACHE="$HF_CACHE_DIR"
+fi
+if [[ -n "${TRITON_CACHE_DIR:-}" ]]; then
+    export TRITON_CACHE_DIR
+fi
 
 # Pre-create dest and copy contents to avoid nesting (data-bin/data-bin) on retries.
 mkdir -p "$work_scratch/dplm/data-bin"

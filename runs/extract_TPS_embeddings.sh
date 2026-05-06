@@ -14,6 +14,18 @@ export PROJECT_ROOT="${PROJECT_ROOT:-/mnt/proj2/fta-26-15/documents/dplm}"
 CONDA_ENV="${CONDA_ENV:-/mnt/proj2/fta-26-15/.conda/envs/dplm}"
 PYTHON_BIN="$CONDA_ENV/bin/python"
 
+# Cache locations (shared across runs to avoid re-downloads and home-dir issues).
+HF_CACHE_DIR="${HF_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/huggingface}"
+TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/triton}"
+if [[ -n "${HF_CACHE_DIR:-}" ]]; then
+    export HF_HOME="$HF_CACHE_DIR"
+    export HF_HUB_CACHE="$HF_CACHE_DIR/hub"
+    export TRANSFORMERS_CACHE="$HF_CACHE_DIR"
+fi
+if [[ -n "${TRITON_CACHE_DIR:-}" ]]; then
+    export TRITON_CACHE_DIR
+fi
+
 CHECKPOINT="${CHECKPOINT:?must set CHECKPOINT}"
 INPUT_FILE="${INPUT_FILE:?must set INPUT_FILE}"
 EMBEDDING_TYPE="${EMBEDDING_TYPE:?must set EMBEDDING_TYPE (mean|bos)}"

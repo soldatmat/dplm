@@ -10,6 +10,11 @@
 
 #export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export CUDA_VISIBLE_DEVICES=0,
+
+# Cache locations (shared across runs to avoid re-downloads and home-dir issues).
+HF_CACHE_DIR="${HF_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/huggingface}"
+TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/triton}"
+
 exp=tps/TPS_dplm_150m_stage3
 run_name=TPS_dplm_150m_stage3_run_debug
 model_checkpoint=/storage/brno2/home/soldatmat/documents/terpene_synthases/dplm/logs/TPS_dplm_150m_stage3_run_8/checkpoints/best.ckpt
@@ -39,6 +44,14 @@ echo "Checkpoint copied to: $scratch_ckpt_dir/last.ckpt" >> "$run_log_dir"/job_i
 model_checkpoint="$scratch_ckpt_dir"/last.ckpt
 mkdir -p $SCRATCHDIR/tmp
 export TMPDIR=$SCRATCHDIR/tmp
+if [[ -n "${HF_CACHE_DIR:-}" ]]; then
+    export HF_HOME="$HF_CACHE_DIR"
+    export HF_HUB_CACHE="$HF_CACHE_DIR/hub"
+    export TRANSFORMERS_CACHE="$HF_CACHE_DIR"
+fi
+if [[ -n "${TRITON_CACHE_DIR:-}" ]]; then
+    export TRITON_CACHE_DIR
+fi
 
 # if the copy operation fails, issue an error message and exit
 mkdir -p $SCRATCHDIR/dplm

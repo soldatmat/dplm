@@ -42,6 +42,10 @@ else
     TRAIN_ENV="${TRAIN_ENV:-/storage/brno2/home/soldatmat/.conda/envs/dplm}"
 fi
 
+# Cache locations (shared across runs to avoid re-downloads and home-dir issues).
+HF_CACHE_DIR="${HF_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/huggingface}"
+TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/triton}"
+
 TRAIN_LR_LIST="${TRAIN_LR_LIST:-1e-3 1e-4 1e-5}"
 WARMUP_STEPS_LIST="${WARMUP_STEPS_LIST:-2000}"
 TOTAL_STEPS_LIST="${TOTAL_STEPS_LIST:-200000}" # controls both lr_scheduler and length of training
@@ -262,6 +266,14 @@ echo "Using work scratch directory: \$work_scratch"
 
 mkdir -p "\$work_scratch/tmp"
 export TMPDIR="\$work_scratch/tmp"
+if [[ -n "${HF_CACHE_DIR:-}" ]]; then
+    export HF_HOME="${HF_CACHE_DIR}"
+    export HF_HUB_CACHE="${HF_CACHE_DIR}/hub"
+    export TRANSFORMERS_CACHE="${HF_CACHE_DIR}"
+fi
+if [[ -n "${TRITON_CACHE_DIR:-}" ]]; then
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR}"
+fi
 
 mkdir -p "\$work_scratch/dplm"
 cp -r "\$DATADIR/data-bin" "\$work_scratch/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }
@@ -345,6 +357,14 @@ echo "Using work scratch directory: \$work_scratch"
 
 mkdir -p "\$work_scratch/tmp"
 export TMPDIR="\$work_scratch/tmp"
+if [[ -n "${HF_CACHE_DIR:-}" ]]; then
+    export HF_HOME="${HF_CACHE_DIR}"
+    export HF_HUB_CACHE="${HF_CACHE_DIR}/hub"
+    export TRANSFORMERS_CACHE="${HF_CACHE_DIR}"
+fi
+if [[ -n "${TRITON_CACHE_DIR:-}" ]]; then
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR}"
+fi
 
 mkdir -p "\$work_scratch/dplm"
 cp -r "\$DATADIR/data-bin" "\$work_scratch/dplm/data-bin/" || { echo >&2 "Error while copying input file(s)!"; exit 2; }
