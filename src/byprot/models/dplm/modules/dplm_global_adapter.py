@@ -82,7 +82,7 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
 
             # Optionally also seed the adapter_* submodules with the same
             # original-layer weights (only where shapes match).
-            if cfg.init_adapter_from_orig:
+            if getattr(cfg, "init_adapter_from_orig", True):
                 orig_state = net_last_layer.state_dict()
                 adapter_target = adapter.state_dict()
                 remapped = {}
@@ -115,9 +115,9 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
             for pname, param in dplm_adapter.named_parameters():
                 if "adapter" not in pname:
                     param.requires_grad = False
-            if cfg.finetune_emb_layer_norm_after:
+            if getattr(cfg, "finetune_emb_layer_norm_after", False):
                 dplm_adapter.net.esm.encoder.emb_layer_norm_after.requires_grad_(True)
-            if cfg.finetune_lm_head:
+            if getattr(cfg, "finetune_lm_head", False):
                 dplm_adapter.net.lm_head.requires_grad_(True)
 
         # Activate LoRA with the PEFT library
