@@ -126,7 +126,7 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
             from peft import LoraConfig, TaskType, get_peft_model
 
             lora_target_module = cfg.lora.lora_target_module
-            modules_to_save = cfg.lora.modules_to_save.split(",")
+            modules_to_save = getattr(cfg.lora, "modules_to_save", "").split(",")
 
             peft_config = LoraConfig(
                 task_type=TaskType.SEQ_2_SEQ_LM,
@@ -135,7 +135,7 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
                 inference_mode=False,
                 r=cfg.lora.lora_rank,
                 lora_alpha=cfg.lora.lora_alpha,
-                lora_dropout=cfg.lora.lora_dropout,
+                lora_dropout=getattr(cfg.lora, "lora_dropout", 0.1),
             )
             dplm_adapter.net = get_peft_model(dplm_adapter.net, peft_config)
             dplm_adapter.net.print_trainable_parameters()
