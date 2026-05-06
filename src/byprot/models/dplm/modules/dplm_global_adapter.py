@@ -44,6 +44,11 @@ class DPLMWithGlobalAdapterConfig:
     from_huggingface: bool = field(default=True)
     net: NetConfig = field(default=NetConfig())
     lora: LoRAConfig = field(default=LoRAConfig())
+    # When the adapter is enabled (any non-prepend mode), the freeze rule
+    # 'adapter not in pname' freezes the base ESM stack. These two flags
+    # opt back in to fine-tuning the post-encoder LayerNorm and the LM head.
+    finetune_emb_layer_norm_after: bool = field(default=False)
+    finetune_lm_head: bool = field(default=False)
 
 
 class DPLMWithConditionalGlobalAdapter(nn.Module):
@@ -80,8 +85,10 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
             for pname, param in dplm_adapter.named_parameters():
                 if "adapter" not in pname:
                     param.requires_grad = False
-            dplm_adapter.net.esm.encoder.emb_layer_norm_after.requires_grad_(True)
-            dplm_adapter.net.lm_head.requires_grad_(True)
+            if cfg.finetune_emb_layer_norm_after:
+                dplm_adapter.net.esm.encoder.emb_layer_norm_after.requires_grad_(True)
+            if cfg.finetune_lm_head:
+                dplm_adapter.net.lm_head.requires_grad_(True)
 
         # Activate LoRA with the PEFT library
         if cfg.lora.enable:
