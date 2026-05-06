@@ -395,8 +395,10 @@ class GlobalAdapterLayerMini(GlobalAdapterLayer):
         adapter_config.intermediate_size = getattr(cfg, "adapter_intermediate_size")
         adapter_config.hidden_size = getattr(cfg, "adapter_hidden_size")
         super().__init__(cfg, config, adapter_config=adapter_config, qdim=config.hidden_size)
-        self.downsize_layer = nn.Linear(config.hidden_size, adapter_config.hidden_size)
-        self.upsize_layer = nn.Linear(adapter_config.hidden_size, config.hidden_size)
+        # "adapter_" prefix is required so the freeze rule
+        # ('adapter' not in pname -> requires_grad=False) keeps these trainable.
+        self.adapter_downsize_layer = nn.Linear(config.hidden_size, adapter_config.hidden_size)
+        self.adapter_upsize_layer = nn.Linear(adapter_config.hidden_size, config.hidden_size)
     
     def forward(
         self,
@@ -436,9 +438,9 @@ class GlobalAdapterLayerMini(GlobalAdapterLayer):
         conditioning_output = self.conditioning_chunk(layer_output, encoder_hidden_states, encoder_attention_mask)
 
         # second feed forward chunk
-        conditioning_output = self.downsize_layer(conditioning_output) # Added in the Mini version
+        conditioning_output = self.adapter_downsize_layer(conditioning_output) # Added in the Mini version
         ffn_output = self.adapter_feed_forward_chunk(conditioning_output)
-        ffn_output = self.upsize_layer(ffn_output) # Added in the Mini version
+        ffn_output = self.adapter_upsize_layer(ffn_output) # Added in the Mini version
         ffn_output += residual
 
         outputs = (ffn_output,) + outputs
