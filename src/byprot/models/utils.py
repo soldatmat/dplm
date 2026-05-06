@@ -97,9 +97,13 @@ def get_net(cfg):
     if cfg.lora.enable:
         # QKVO, MLP
         lora_target_module = cfg.lora.lora_target_module
-        modules_to_save = cfg.lora.modules_to_save.split(",")
-        if modules_to_save == [""]:
-            modules_to_save = None
+        # Accept either comma-separated string or list/ListConfig.
+        modules_to_save_raw = cfg.lora.modules_to_save
+        if isinstance(modules_to_save_raw, str):
+            modules_to_save = [m for m in modules_to_save_raw.split(",") if m]
+        else:
+            modules_to_save = [m for m in modules_to_save_raw if m]
+        modules_to_save = modules_to_save or None
 
         peft_config = LoraConfig(
             task_type=TaskType.SEQ_2_SEQ_LM,
@@ -203,7 +207,12 @@ def get_net_dplm2(cfg):
     if cfg.lora.enable:
         # QKVO, MLP
         lora_target_module = cfg.lora.lora_target_module
-        modules_to_save = cfg.lora.modules_to_save.split(",")
+        modules_to_save_raw = cfg.lora.modules_to_save
+        if isinstance(modules_to_save_raw, str):
+            modules_to_save = [m for m in modules_to_save_raw.split(",") if m]
+        else:
+            modules_to_save = [m for m in modules_to_save_raw if m]
+        modules_to_save = modules_to_save or None
 
         peft_config = LoraConfig(
             task_type=TaskType.SEQ_2_SEQ_LM,
@@ -251,7 +260,12 @@ def get_net_dplm2_bit(cfg):
     if cfg.lora.enable:
         # QKVO, MLP
         lora_target_module = cfg.lora.lora_target_module.split(",")
-        modules_to_save = cfg.lora.modules_to_save.split(",")
+        modules_to_save_raw = cfg.lora.modules_to_save
+        if isinstance(modules_to_save_raw, str):
+            modules_to_save = [m for m in modules_to_save_raw.split(",") if m]
+        else:
+            modules_to_save = [m for m in modules_to_save_raw if m]
+        modules_to_save = modules_to_save or None
 
         peft_config = LoraConfig(
             task_type=TaskType.SEQ_2_SEQ_LM,
