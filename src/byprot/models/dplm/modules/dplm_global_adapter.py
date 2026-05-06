@@ -49,6 +49,10 @@ class DPLMWithGlobalAdapterConfig:
     # opt back in to fine-tuning the post-encoder LayerNorm and the LM head.
     finetune_emb_layer_norm_after: bool = field(default=False)
     finetune_lm_head: bool = field(default=False)
+    # If True (default), copy weights from the original last ESM layer into
+    # the corresponding adapter_* submodules of the new GlobalAdapterLayer
+    # whenever shapes match. Set False to keep adapter_* at random init.
+    init_adapter_from_orig: bool = field(default=True)
 
 
 class DPLMWithConditionalGlobalAdapter(nn.Module):
@@ -71,7 +75,33 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
             else:
                 adapter = GlobalAdapterLayer(cfg, deepcopy(net.config))
             net_last_layer = net.esm.encoder.layer[-1]
+            # Loads the main-path slots ('attention.*', 'LayerNorm.*',
+            # 'intermediate.*', 'output.*') of the new layer; adapter_*
+            # slots have no counterpart here and stay at default init.
             adapter.load_state_dict(net_last_layer.state_dict(), strict=False)
+
+            # Optionally also seed the adapter_* submodules with the same
+            # original-layer weights (only where shapes match).
+            if cfg.init_adapter_from_orig:
+                orig_state = net_last_layer.state_dict()
+                adapter_target = adapter.state_dict()
+                remapped = {}
+                for k, v in orig_state.items():
+                    if k.startswith("attention."):
+                        new_k = "adapter_cross" + k  # attention.* -> adapter_crossattention.*
+                    elif k.startswith(("LayerNorm.", "intermediate.", "output.")):
+                        new_k = "adapter_" + k
+                    else:
+                        continue
+                    if new_k in adapter_target and adapter_target[new_k].shape == v.shape:
+                        remapped[new_k] = v
+                if remapped:
+                    adapter.load_state_dict(remapped, strict=False)
+                    logger.info(
+                        f"Initialized {len(remapped)} adapter_* tensors of "
+                        f"layer[-1] from the original last-layer weights."
+                    )
+
             net.esm.encoder.layer[-1] = adapter
             del net_last_layer
 
