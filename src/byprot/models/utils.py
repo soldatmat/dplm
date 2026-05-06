@@ -6,7 +6,7 @@ import importlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import logging
 log = logging.getLogger(__name__)
@@ -41,7 +41,9 @@ class LoRAConfig:
     lora_alpha: int = field(default=32)
     lora_dropout: float = field(default=0.1)
     lora_target_module: str = field(default="")
-    modules_to_save: str = field(default="")
+    # Any so the override syntax modules_to_save=[a,b,c] (Hydra list form) is
+    # accepted alongside the legacy "a,b,c" string form.
+    modules_to_save: Any = field(default="")
 
 
 def get_net_class(dplm_type):
