@@ -64,6 +64,8 @@ LORA_TARGET_MODULE_LIST="${LORA_TARGET_MODULE_LIST:-(esm.encoder.layer.[0-9]*.at
 # Used in run_name/job_name in place of the numeric index. Empty -> use indices.
 LORA_TARGET_MODULE_LABELS_LIST="${LORA_TARGET_MODULE_LABELS_LIST:-}"
 
+EXTRA_OVERRIDES="${EXTRA_OVERRIDES:-}"
+
 DEFAULT_RESOURCE_SPEC=""
 
 # -------------------------
@@ -318,7 +320,8 @@ cd "\$DATADIR"
     model.lora.enable=${lora_enable} \
     model.lora.lora_rank=${lora_rank} \
     model.lora.lora_alpha=${lora_alpha} \
-    model.lora.lora_target_module="'${lora_target_module}'"
+    model.lora.lora_target_module="'${lora_target_module}'" \
+    ${EXTRA_OVERRIDES}
 
 cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 
@@ -408,7 +411,8 @@ cd "\$DATADIR"
     model.lora.enable=${lora_enable} \
     model.lora.lora_rank=${lora_rank} \
     model.lora.lora_alpha=${lora_alpha} \
-    model.lora.lora_target_module="'${lora_target_module}'"
+    model.lora.lora_target_module="'${lora_target_module}'" \
+    ${EXTRA_OVERRIDES}
 
 cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" || { echo >&2 "Result file(s) copying failed (with a code \$?)!"; exit 4; }
 
