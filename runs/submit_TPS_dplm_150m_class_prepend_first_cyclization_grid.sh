@@ -283,7 +283,7 @@ if [[ -n "\${SCRATCHDIR:-}" ]]; then
     work_scratch="\$SCRATCHDIR"
 else
     work_scratch="\$(mktemp -d /tmp/dplm_\${run_name}_XXXXXX)"
-    trap 'rm -rf "\$work_scratch"' EXIT
+    trap 'cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" 2>/dev/null; rm -rf "\$work_scratch"' EXIT
 fi
 echo "Using work scratch directory: \$work_scratch"
 
@@ -388,7 +388,7 @@ if [[ -n "\${SCRATCHDIR:-}" ]]; then
     work_scratch="\$SCRATCHDIR"
 else
     work_scratch="\$(mktemp -d /tmp/dplm_\${run_name}_XXXXXX)"
-    trap 'rm -rf "\$work_scratch"' EXIT
+    trap 'cp -r "\$work_scratch/dplm/logs/\${run_name}" "\$DATADIR/logs/" 2>/dev/null; rm -rf "\$work_scratch"' EXIT
 fi
 echo "Using work scratch directory: \$work_scratch"
 
