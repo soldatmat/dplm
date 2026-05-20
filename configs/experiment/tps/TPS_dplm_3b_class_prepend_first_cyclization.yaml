@@ -19,7 +19,7 @@ datamodule:
   max_tokens: 1024 # original 6000
   # max_len: 1022
   class_column: First_cyclization_product
-  n_classes: 25
+  n_classes: ${csv_unique_count:${datamodule.data_path},${datamodule.class_column}}
 
 model:
   _target_: dplm_class
