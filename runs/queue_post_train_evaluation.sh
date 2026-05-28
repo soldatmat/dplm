@@ -38,7 +38,8 @@ if [[ -z "${RUN_DIR:-}" ]]; then
 fi
 
 CKPT_DIR="$RUN_DIR/checkpoints"
-EVAL_ROOT="$RUN_DIR/post_train_evaluation"
+EVAL_ROOT_NAME="${EVAL_ROOT_NAME:-post_train_evaluation}"
+EVAL_ROOT="$RUN_DIR/$EVAL_ROOT_NAME"
 
 TRAIN_FASTA="${TRAIN_FASTA:-/mnt/proj2/fta-26-15/documents/dplm/data-bin/MARTS-DB/2026-04-12/TPS_sequences.fasta}"
 
@@ -77,17 +78,59 @@ mkdir -p "$EVAL_ROOT"
 # Helpers
 # -------------------------
 
+# Optional generate-time overrides forwarded to queue_generate_dplm_fixed.sh.
+# Empty => the QGEN script's defaults apply.
+GEN_SEED="${GEN_SEED:-}"
+GEN_ARCHITECTURE="${GEN_ARCHITECTURE:-}"
+GEN_CLASS_IDS="${GEN_CLASS_IDS:-}"
+GEN_TEMPERATURE="${GEN_TEMPERATURE:-}"
+GEN_SAMPLING_STRATEGY="${GEN_SAMPLING_STRATEGY:-}"
+GEN_MAX_ITER="${GEN_MAX_ITER:-}"
+GEN_BATCH_SIZE="${GEN_BATCH_SIZE:-}"
+GEN_BATCH_LENS_TOGETHER="${GEN_BATCH_LENS_TOGETHER:-}"
+
+# Standalone-loader overrides consumed by load_yaml_config when the saved
+# training cfg has interpolations that no longer resolve (vanished training
+# scratch paths) or values that don't match the on-disk data after a
+# downstream change (e.g. post-2026-05-20 class merge breaking older 24-class
+# DPLMClass checkpoints). Empty => no override applied.
+DPLM_DATA_DIR_OVERRIDE="${DPLM_DATA_DIR_OVERRIDE:-}"
+DPLM_N_CLASSES="${DPLM_N_CLASSES:-}"
+# Use the literal sentinel "EMPTY" to send an empty string (which makes
+# ClassEncoder skip the weight_path load). Plain empty env vars are dropped
+# by sbatch --export's comma-list parser, so we need the sentinel to
+# distinguish "not set" from "set to empty".
+DPLM_ENCODER_WEIGHT_PATH="${DPLM_ENCODER_WEIGHT_PATH:-}"
+
+# Build the --export list for sbatch. Always include core vars; conditionally
+# add GEN_* / DPLM_* entries so they propagate to queue_generate_dplm_fixed.sh.
+build_export_list() {
+    local ckpt="$1" save_dir="$2"
+    local exports="ALL,PROJECT_ROOT=$PROJECT_ROOT_EXPORT,CHECKPOINT=$ckpt,SAVE_DIR=$save_dir,INLINE_SEQ_LENS=$SEQ_LEN,INLINE_NUM_SEQS=$NUM_SEQS"
+    local v
+    for v in GEN_SEED GEN_ARCHITECTURE GEN_CLASS_IDS GEN_TEMPERATURE \
+             GEN_SAMPLING_STRATEGY GEN_MAX_ITER GEN_BATCH_SIZE \
+             GEN_BATCH_LENS_TOGETHER \
+             DPLM_DATA_DIR_OVERRIDE DPLM_N_CLASSES DPLM_ENCODER_WEIGHT_PATH; do
+        if [[ -n "${!v}" ]]; then
+            exports+=",${v}=${!v}"
+        fi
+    done
+    echo "$exports"
+}
+
 # Submit a generation job for step N. Echos the job id (or "DRY" in dry-run).
 submit_generation() {
     local step="$1" ckpt="$2" save_dir="$3"
     local job_name="${JOB_PREFIX}_gen_s${step}"
+    local exports
+    exports=$(build_export_list "$ckpt" "$save_dir")
 
     if [[ "$DRY_RUN" == "1" ]]; then
         cat >&2 <<EOF
 [DRY_RUN][gen step=$step]
-  PROJECT_ROOT=$PROJECT_ROOT_EXPORT CHECKPOINT=$ckpt SAVE_DIR=$save_dir INLINE_SEQ_LENS=$SEQ_LEN INLINE_NUM_SEQS=$NUM_SEQS \\
   sbatch --parsable -J $job_name \\
-         --export=ALL,PROJECT_ROOT=$PROJECT_ROOT_EXPORT,CHECKPOINT=$ckpt,SAVE_DIR=$save_dir,INLINE_SEQ_LENS=$SEQ_LEN,INLINE_NUM_SEQS=$NUM_SEQS \\
+         --export=$exports \\
          -o $save_dir/slurm-gen-%j.out -e $save_dir/slurm-gen-%j.err \\
          $QGEN
 EOF
@@ -97,7 +140,7 @@ EOF
 
     sbatch --parsable \
            -J "$job_name" \
-           --export="ALL,PROJECT_ROOT=$PROJECT_ROOT_EXPORT,CHECKPOINT=$ckpt,SAVE_DIR=$save_dir,INLINE_SEQ_LENS=$SEQ_LEN,INLINE_NUM_SEQS=$NUM_SEQS" \
+           --export="$exports" \
            -o "$save_dir/slurm-gen-%j.out" \
            -e "$save_dir/slurm-gen-%j.err" \
            "$QGEN"

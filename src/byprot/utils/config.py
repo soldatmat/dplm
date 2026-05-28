@@ -51,6 +51,41 @@ def merge_config(default_cfg, override_cfg):
 
 def load_yaml_config(fpath: str) -> OmegaConf:
     cfg = OmegaConf.load(fpath)
+    # Standalone callers (e.g. generate_dplm_fixed.py loading a training
+    # checkpoint's saved .hydra/config.yaml) hit FileNotFoundError when the
+    # cfg's ${paths.data_dir}/... interpolations point to vanished training
+    # scratch dirs. Allow overriding the relevant paths via env vars before
+    # resolve. No-ops unless DPLM_DATA_DIR / DPLM_LOG_DIR / DPLM_CKPT_DIR are
+    # explicitly set.
+    overrides = (
+        ("DPLM_DATA_DIR", "paths.data_dir"),
+        ("DPLM_LOG_DIR",  "paths.log_dir"),
+        ("DPLM_CKPT_DIR", "paths.ckpt_dir"),
+        # Older DPLMClass checkpoints (trained before the 2026-05-20 class
+        # merge from 24 -> 22 first_cyclization classes) need n_classes=24
+        # and must skip the on-disk class-embedding weight_path which has
+        # since been overwritten with the (22, 640) post-merge tensor.
+        ("DPLM_N_CLASSES",          "datamodule.n_classes"),
+        ("DPLM_ENCODER_WEIGHT_PATH", "model.encoder.weight_path"),
+    )
+    for env_key, cfg_key in overrides:
+        if env_key not in os.environ:
+            continue
+        val = os.environ[env_key]
+        # Literal "EMPTY" sentinel decodes to "" — sbatch --export drops
+        # comma-list entries with empty values, so callers needing to set a
+        # cfg key to the empty string must pass "EMPTY".
+        if val == "EMPTY":
+            val = ""
+        if env_key == "DPLM_N_CLASSES":
+            try:
+                val = int(val)
+            except ValueError:
+                pass
+        try:
+            OmegaConf.update(cfg, cfg_key, val, merge=False)
+        except Exception:
+            pass
     OmegaConf.resolve(cfg)
     return cfg
 

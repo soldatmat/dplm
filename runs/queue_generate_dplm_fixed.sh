@@ -16,9 +16,23 @@ CHECKPOINT="${CHECKPOINT:-/mnt/proj2/fta-26-15/documents/dplm/logs/TPS_dplm_150m
 CSV_PATH="${CSV_PATH:-/mnt/proj2/fta-26-15/documents/output/dplm/sampled_lengths_1000.csv}"
 SAVE_DIR="${SAVE_DIR:-/mnt/proj2/fta-26-15/documents/output/dplm/TPS_dplm_150m_stage3_run_8_step20000/sl1000_t1.0-generate_dplm_fixed}"
 CONDA_ENV="${CONDA_ENV:-/mnt/proj2/fta-26-15/.conda/envs/dplm}"
+# Persistent data path used by load_yaml_config to replace any stale
+# ${paths.data_dir} interpolation baked into the saved training cfg.
+export DPLM_DATA_DIR="${DPLM_DATA_DIR:-$PROJECT_ROOT/data-bin}"
 PYTHON_BIN="$CONDA_ENV/bin/python"
 INLINE_SEQ_LENS="${INLINE_SEQ_LENS:-}"
 INLINE_NUM_SEQS="${INLINE_NUM_SEQS:-}"
+
+# Optional generate_dplm_fixed.py flags. Empty => use the script's defaults.
+GEN_SEED="${GEN_SEED:-}"
+GEN_ARCHITECTURE="${GEN_ARCHITECTURE:-}"
+# Space-separated list of class ids (DPLMClass only). Example: "0" or "0 1 2".
+GEN_CLASS_IDS="${GEN_CLASS_IDS:-}"
+GEN_TEMPERATURE="${GEN_TEMPERATURE:-1.0}"
+GEN_SAMPLING_STRATEGY="${GEN_SAMPLING_STRATEGY:-}"
+GEN_MAX_ITER="${GEN_MAX_ITER:-}"
+GEN_BATCH_SIZE="${GEN_BATCH_SIZE:-}"
+GEN_BATCH_LENS_TOGETHER="${GEN_BATCH_LENS_TOGETHER:-}"  # set to "true" or "false" to override; empty => script default
 
 # Cache locations (shared across runs to avoid re-downloads and home-dir issues).
 HF_CACHE_DIR="${HF_CACHE_DIR:-/mnt/proj2/fta-26-15/.cache/huggingface}"
@@ -92,10 +106,26 @@ fi
 
 cd "$PROJECT_ROOT"
 
-"$PYTHON_BIN" generate_dplm_fixed.py \
-    --model_name "$CHECKPOINT" \
-    --no-from_huggingface \
-    --saveto "$SAVE_DIR" \
-    --temperature 1.0 \
-    --seq_lens "${SEQ_LENS[@]}" \
+GEN_ARGS=(
+    --model_name "$CHECKPOINT"
+    --no-from_huggingface
+    --saveto "$SAVE_DIR"
+    --temperature "$GEN_TEMPERATURE"
+    --seq_lens "${SEQ_LENS[@]}"
     --num_seqs "${NUM_SEQS[@]}"
+)
+[[ -n "$GEN_SEED"              ]] && GEN_ARGS+=( --seed "$GEN_SEED" )
+[[ -n "$GEN_ARCHITECTURE"      ]] && GEN_ARGS+=( --architecture "$GEN_ARCHITECTURE" )
+[[ -n "$GEN_SAMPLING_STRATEGY" ]] && GEN_ARGS+=( --sampling_strategy "$GEN_SAMPLING_STRATEGY" )
+[[ -n "$GEN_MAX_ITER"          ]] && GEN_ARGS+=( --max_iter "$GEN_MAX_ITER" )
+[[ -n "$GEN_BATCH_SIZE"        ]] && GEN_ARGS+=( --batch_size "$GEN_BATCH_SIZE" )
+if [[ -n "$GEN_CLASS_IDS" ]]; then
+    read -r -a _CLASS_IDS_ARR <<< "$GEN_CLASS_IDS"
+    GEN_ARGS+=( --class_ids "${_CLASS_IDS_ARR[@]}" )
+fi
+case "$GEN_BATCH_LENS_TOGETHER" in
+    true)  GEN_ARGS+=( --batch_lens_together );;
+    false) GEN_ARGS+=( --no-batch_lens_together );;
+esac
+
+"$PYTHON_BIN" generate_dplm_fixed.py "${GEN_ARGS[@]}"

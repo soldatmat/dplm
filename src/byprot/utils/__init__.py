@@ -77,6 +77,14 @@ def _csv_unique_count(csv_path: str, column: str) -> int:
     return int(pd.read_csv(csv_path, usecols=[column])[column].nunique())
 
 
+# Register OmegaConf custom resolvers at import time so they're available to
+# any user of byprot.utils — not just paths that call extras(). Without this,
+# standalone scripts (e.g. generate_dplm_fixed.py) crash on
+# DPLMClass.from_pretrained when the saved cfg uses ${csv_unique_count:...}.
+OmegaConf.register_new_resolver("eval", eval, replace=True)
+OmegaConf.register_new_resolver("csv_unique_count", _csv_unique_count, replace=True)
+
+
 def extras(config: DictConfig) -> None:
     """Applies optional utilities, controlled by config flags.
 
