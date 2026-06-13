@@ -142,6 +142,7 @@ def generate_iteration(args, model, tokenizer, input_tokens, seq_len, class_ids=
                 sampling_strategy=args.sampling_strategy,
                 partial_masks=partial_mask,
                 temperature=args.temperature,
+                guidance_w=getattr(args, "guidance_w", 0.0),
             )
 
     # Extract generated sequences

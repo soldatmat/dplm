@@ -57,7 +57,15 @@ class DPLMClass(nn.Module):
     def _update_cfg(self, cfg):
         if "_target_" in cfg.encoder:
             cfg.encoder.pop("_target_")
-        self.cfg = OmegaConf.merge(self._default_cfg, cfg)
+        # Merge with the default, but the encoder sub-config may carry keys not
+        # in the structured ClassEncoderConfig schema (e.g. the A3
+        # NeighborEncoder's source_dim / neighbor_artifact_path / projector).
+        # Convert the structured default to a plain (schema-free) container so
+        # the merge accepts arbitrary encoder keys.
+        default = OmegaConf.create(
+            OmegaConf.to_container(OmegaConf.structured(self._default_cfg), resolve=False)
+        )
+        self.cfg = OmegaConf.merge(default, cfg)
 
     @classmethod
     def from_pretrained(cls, net_name, cfg_override={}, net_override={}):
@@ -136,7 +144,15 @@ class DPLMClass(nn.Module):
                 batch["class_ids"], output_logits=True, **kwargs
             )
         else:
-            encoder_out = self.encoder(batch["class_ids"], output_logits=False, **kwargs)
+            # A3 Option A: pass the per-example neighbor embedding (cond_emb)
+            # through to the encoder when the datamodule provides it. The
+            # class-index ClassEncoder ignores the unknown kwarg.
+            encoder_out = self.encoder(
+                batch["class_ids"],
+                output_logits=False,
+                cond_emb=batch.get("cond_emb", None),
+                **kwargs,
+            )
 
         encoder_out = {"feats": encoder_out}
         encoder_out["feats"] = encoder_out["feats"].repeat(2, 1) #.detach()
@@ -162,12 +178,16 @@ class DPLMClass(nn.Module):
             None, # encoder_logits.repeat(2, 1, 1) if output_encoder_logits else None,
         )
 
-    def forward_encoder(self, batch, use_draft_seq=False):
+    def forward_encoder(self, batch, use_draft_seq=False, force_null=False):
         encoder_logits = None
         encoder_out = None
 
         encoder_out = self.encoder(
-            batch["class_ids"], return_feats=True, output_logits=False
+            batch["class_ids"],
+            return_feats=True,
+            output_logits=False,
+            cond_emb=batch.get("cond_emb", None),
+            force_null=force_null,
         )
         encoder_out = {"feats": encoder_out}
         if use_draft_seq:
@@ -196,6 +216,8 @@ class DPLMClass(nn.Module):
         need_attn_weights=False,
         partial_masks=None,
         sampling_strategy="gumbel_argmax",
+        encoder_out_null=None,
+        guidance_w=0.0,
     ):
         output_tokens = prev_decoder_out["output_tokens"].clone()
         output_scores = prev_decoder_out["output_scores"].clone()
@@ -216,6 +238,22 @@ class DPLMClass(nn.Module):
         attentions = esm_out["attentions"] if need_attn_weights else None
 
         logits = esm_logits
+
+        # A3 Option D: logit-space classifier-free guidance. Run the
+        # unconditional (null) branch and extrapolate
+        #   logit = (1+w_eff)*cond - w_eff*uncond,
+        # with a RAMPED weight: weak early (mostly masked) -> strong late, the
+        # key masked-diffusion caveat. ramp = (step+1)/max_step in [0, 1].
+        if guidance_w and guidance_w > 0.0 and encoder_out_null is not None:
+            esm_out_null = self.decoder(
+                input_ids=output_tokens,
+                encoder_out=encoder_out_null,
+                need_head_weights=False,
+            )
+            uncond_logits = esm_out_null["logits"]
+            ramp = float(step + 1) / float(max_step)
+            w_eff = guidance_w * ramp
+            logits = (1.0 + w_eff) * logits - w_eff * uncond_logits
 
         logits[..., self.mask_id] = -math.inf
         logits[..., self.x_id] = -math.inf
@@ -412,6 +450,7 @@ class DPLMClass(nn.Module):
         partial_masks=None,
         sampling_strategy="argmax",
         use_draft_seq=False,
+        guidance_w=0.0,
     ):
         tokenizer = tokenizer
         max_iter = max_iter
@@ -419,6 +458,15 @@ class DPLMClass(nn.Module):
 
         # 0) encoding
         encoder_out = self.forward_encoder(batch, use_draft_seq=use_draft_seq)
+
+        # A3 Option D: precompute the unconditional (null) encoder output once;
+        # reused at every denoising step for logit-space CFG. Only available
+        # when the encoder supports a learned null embedding (ClassEncoder).
+        encoder_out_null = None
+        if guidance_w and guidance_w > 0.0:
+            encoder_out_null = self.forward_encoder(
+                batch, use_draft_seq=use_draft_seq, force_null=True
+            )
         # 1) initialized from all mask tokens
         (
             initial_output_tokens,
@@ -452,6 +500,8 @@ class DPLMClass(nn.Module):
                     encoder_out=encoder_out,
                     partial_masks=partial_masks,
                     sampling_strategy=sampling_strategy,
+                    encoder_out_null=encoder_out_null,
+                    guidance_w=guidance_w,
                 )
 
             output_tokens = decoder_out["output_tokens"]

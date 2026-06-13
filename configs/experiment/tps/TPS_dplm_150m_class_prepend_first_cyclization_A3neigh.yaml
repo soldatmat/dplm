@@ -1,0 +1,106 @@
+# @package _global_
+#
+# A3 Option A: same-class-neighbor exemplar conditioning, PREPEND injection.
+# Non-destructive variant of TPS_dplm_150m_class_prepend_first_cyclization.yaml:
+# swaps the frozen per-class mean-embedding lookup (class_encoder) for a
+# trainable projector (class_encoder_neighbor) over a frozen precomputed 640-d
+# ESM neighbor embedding supplied by the datamodule (different same-class enzyme
+# per example; per-class medoid at inference).
+
+defaults:
+  - /datamodule: martsdb_class
+  - /callbacks: fixedbb_tps
+  - /trainer: ddp_fp16
+
+project: "TPS_DPLM_150m_class_prepend_first_cyclization_A3neigh"
+name: "tps_dplm_150m_class_prepend_first_cyclization_A3neigh"
+
+datamodule:
+  max_tokens: 8192
+  class_column: First_cyclization_product
+  n_classes: ${csv_unique_count:${datamodule.data_path},${datamodule.class_column}}
+  neighbor_conditioning: true
+  neighbor_artifact_path: ${paths.data_dir}/MARTS-DB/2026-04-12/embeddings/dplm_150m_stage3_grid_run_41V_step200000/neighbor_conditioning_emb.pt
+
+model:
+  _target_: dplm_class
+  decoder:
+    num_diffusion_timesteps: 100
+    adapter_dropout: 0.1
+    from_huggingface: true
+    dplm_name: airkingbd/dplm_150m
+    encoder_d_model: ${model.encoder.embedding_dim}
+    encoder_conditioning_mode: "prepend"
+    lora:
+      enable: true
+      lora_rank: 1
+      lora_alpha: 2
+      lora_dropout: 0.1
+      lora_target_module: esm.(encoder.layer.[0-9]*.(attention.(self.query|self.key|self.value|output.dense).*|(intermediate|output).dense.*))|lm_head.(dense|decoder)
+      modules_to_save: ""
+  encoder:
+    _target_: class_encoder_neighbor
+    output_logits: ${task.learning.output_encoder_logits}
+    embedding_dim: 640
+    source_dim: 640
+    n_classes: ${datamodule.n_classes}
+    neighbor_artifact_path: ${datamodule.neighbor_artifact_path}
+    projector: linear
+
+  init_pred_where: true
+
+task:
+  _target_: lm/dplm_class
+  alphabet: ${datamodule.alphabet}
+  learning:
+    noise: random_mask
+    watch_t1_t2_loss: false
+    cal_constant_loss: false
+    weight: linear
+    output_encoder_logits: false
+  criterion:
+    _target_: byprot.modules.cross_entropy.RDMCrossEntropyLoss
+    label_smoothing: 0.0
+    ignore_index: 1
+  optimizer:
+    type: adamw
+    _partial_: true
+    lr: ${train.lr}
+    betas:
+      - 0.9
+      - 0.98
+    weight_decay: 0.0001
+  lr_scheduler:
+    type: noam
+    warmup_steps: 4000
+    model_size: 128
+    lr: ${train.lr}
+    warmup_init_lr: 1e-07
+  generator:
+    max_iter: 10
+    strategy: "discrete_diffusion"
+    temperature: 1.0
+    eval_plddt: False
+    sampling_strategy: "argmax"
+    use_draft_seq: true
+
+train:
+  seed: 42
+  lr: 0.001
+  monitor: "val/loss"
+  mode: "min"
+  patience: 1000
+
+trainer:
+  min_epochs: 10
+  max_epochs: 10000
+  gradient_clip_val: 0.0
+  num_sanity_val_steps: -1
+  reload_dataloaders_every_n_epochs: 1
+  use_distributed_sampler: false
+  max_steps: 200_000
+  accumulate_grad_batches: 1
+  check_val_every_n_epoch: 1
+  val_check_interval: 1.0
+  enable_progress_bar: true
+  fast_dev_run: false

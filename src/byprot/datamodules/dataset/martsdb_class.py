@@ -192,17 +192,27 @@ class MartsDBClassDataset(Dataset):
         max_len=2048,
         sequence_column: str = "Aminoacid_sequence",
         split_column: str = "split",
+        id_column: str = "Enzyme_marts_ID",
+        neighbor_conditioning: bool = False,
+        neighbor_artifact_path: str = None,
     ):
         self.csv_file = csv_file
         self.max_len = max_len
         self.sequence_column = sequence_column
         self.class_column = class_column
         self.split_column = split_column
-        
+        self.id_column = id_column
+        self.neighbor_conditioning = neighbor_conditioning
+
         data = pd.read_csv(self.csv_file)
         if split is not None:
             data = data[data[split_column] == split]
-        data = data[[sequence_column, class_column]]
+        # A3 Option A keeps the enzyme id so a same-class neighbor can be
+        # sampled and its precomputed embedding looked up.
+        keep_cols = [sequence_column, class_column]
+        if self.neighbor_conditioning:
+            keep_cols = [id_column] + keep_cols
+        data = data[keep_cols].reset_index(drop=True)
         self.data = data
 
         self.class2id = {v: i for i, v in enumerate(sorted(self.data[self.class_column].unique()))}
@@ -213,13 +223,50 @@ class MartsDBClassDataset(Dataset):
         self.sequence_lens = self.data[sequence_column].str.len().tolist()
 
         log.info(f"Dataset size: {len(self.data)}")
-        
+
+        # ---- A3 Option A: same-class-neighbor exemplar conditioning ----
+        if self.neighbor_conditioning:
+            if not neighbor_artifact_path:
+                raise ValueError(
+                    "neighbor_conditioning=True requires neighbor_artifact_path "
+                    "(the precompute_neighbor_conditioning.py .pt artifact)."
+                )
+            artifact = torch.load(neighbor_artifact_path, map_location="cpu")
+            self._neighbor_emb = artifact["emb"].float()  # [N_enz, 640]
+            self._id2row = {e: i for i, e in enumerate(artifact["enzyme_ids"])}
+            self._class_medoid = artifact["class_medoid"].float()  # [n_classes, 640]
+            # Per-class list of enzyme ids present in THIS dataset (so neighbors
+            # are sampled only from sequences the model is training on).
+            self._class_to_enzymes = {
+                c: [] for c in range(len(self.class2id))
+            }
+            for _, r in self.data[[id_column, class_column]].iterrows():
+                if r[id_column] in self._id2row:
+                    self._class_to_enzymes[r[class_column]].append(r[id_column])
+            log.info(
+                "Neighbor conditioning enabled: per-class member counts "
+                + str({c: len(v) for c, v in self._class_to_enzymes.items()})
+            )
 
     def __len__(self):
         return len(self.data)
 
     def get_metadata_lens(self):
         return self.sequence_lens
+
+    def _sample_neighbor_emb(self, idx, class_id):
+        """Embedding of a RANDOM DIFFERENT same-class enzyme (never the target).
+
+        Singleton classes (no different member) fall back to the class medoid.
+        """
+        own_id = self.data.iloc[idx][self.id_column]
+        candidates = [
+            e for e in self._class_to_enzymes[class_id] if e != own_id
+        ]
+        if len(candidates) == 0:
+            return self._class_medoid[class_id]
+        neighbor = candidates[np.random.randint(len(candidates))]
+        return self._neighbor_emb[self._id2row[neighbor]]
 
     def __getitem__(self, idx):
         consensus = self.data.iloc[idx][self.sequence_column]
@@ -232,6 +279,10 @@ class MartsDBClassDataset(Dataset):
         consensus = consensus[start:stop]
 
         class_id = self.data.iloc[idx][self.class_column]
+
+        if self.neighbor_conditioning:
+            cond_emb = self._sample_neighbor_emb(idx, class_id)
+            return consensus, class_id, cond_emb
 
         return consensus, class_id
 
@@ -273,7 +324,14 @@ class DPLMClassCollater(object):
             print("list idx error!")
             print(input_data)
 
-        sequences, class_ids = zip(*input_data)
+        # A3 Option A items are 3-tuples (seq, class_id, cond_emb); the default
+        # class-index path yields 2-tuples (seq, class_id).
+        cond_emb = None
+        if len(input_data[0]) == 3:
+            sequences, class_ids, cond_emb_list = zip(*input_data)
+            cond_emb = torch.stack([e.float() for e in cond_emb_list], dim=0)
+        else:
+            sequences, class_ids = zip(*input_data)
         class_ids = torch.tensor(class_ids, dtype=torch.long)
 
         batch = self.alphabet.batch_encode_plus(sequences,
@@ -288,6 +346,8 @@ class DPLMClassCollater(object):
                 'class_ids':  class_ids,
                 'lengths':    torch.tensor([len(seq) for seq in sequences], dtype=torch.long),
             }
+        if cond_emb is not None:
+            batch['cond_emb'] = cond_emb
 
         return batch
 

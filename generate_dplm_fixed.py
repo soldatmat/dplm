@@ -64,6 +64,10 @@ def parse_args():
         "--sampling_strategy", type=str, default="gumbel_argmax"
     )
     parser.add_argument("--max_iter", type=int, default=500)
+    # A3 Option D: logit-space classifier-free guidance scale. 0 (default) =
+    # off / unchanged behaviour. Only used by DPLMClass models trained with a
+    # learned null embedding (cfg_dropout > 0).
+    parser.add_argument("--guidance_w", type=float, default=0.0)
     parser.add_argument("--batch_lens_together", default=False, action=argparse.BooleanOptionalAction)
     parser.add_argument("--batch_size", type=int, default=32)
     # inpainting
