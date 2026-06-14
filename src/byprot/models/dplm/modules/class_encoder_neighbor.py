@@ -34,6 +34,14 @@ class NeighborEncoderConfig:
     # Projector: "linear" (640->emb) or "mlp" (640->emb->emb with GELU).
     projector: str = "linear"
     projector_hidden_dim: int = 640
+    # A4: classifier-free guidance over the NEIGHBOR conditioning path. When
+    # cfg_dropout > 0, during training each example's projected neighbor
+    # embedding is replaced with a single LEARNED null vector with this
+    # probability; at inference force_null=True returns the same null. The null
+    # lives in the OUTPUT (projected) space, so it composes with the existing
+    # logit-space CFG generate path unchanged. 0.0 (default) -> behaviour
+    # identical to the original neighbor-only NeighborEncoder (runs 3/4/5).
+    cfg_dropout: float = 0.0
 
 
 @register_model("class_encoder_neighbor")
@@ -54,6 +62,7 @@ class NeighborEncoder(torch.nn.Module):
         projector="linear",
         projector_hidden_dim=640,
         output_logits=False,
+        cfg_dropout=0.0,
         **kwargs,
     ):
         super().__init__()
@@ -94,7 +103,24 @@ class NeighborEncoder(torch.nn.Module):
         else:
             raise ValueError(f"Unknown projector type: {projector}")
 
-    def forward(self, class_ids, cond_emb=None, output_logits=False, **kwargs):
+        # A4: single LEARNED null embedding in the OUTPUT (projected) space, used
+        # for classifier-free guidance over the neighbor path. Always trainable.
+        # Initialised small so it starts near the origin without being zeros.
+        # Mirrors ClassEncoder.null_embedding so dplm_class.generate's force_null
+        # / logit-space CFG path works identically for both encoders.
+        self.cfg_dropout = cfg_dropout
+        self.null_embedding = torch.nn.Parameter(
+            torch.randn(1, embedding_dim) * 0.02
+        )
+
+    def forward(
+        self,
+        class_ids,
+        cond_emb=None,
+        output_logits=False,
+        force_null=False,
+        **kwargs,
+    ):
         if output_logits:
             raise NotImplementedError("output_logits=True is not implemented.")
         if cond_emb is None:
@@ -103,4 +129,24 @@ class NeighborEncoder(torch.nn.Module):
         cond_emb = cond_emb.to(self.projector[0].weight.dtype
                                if isinstance(self.projector, torch.nn.Sequential)
                                else self.projector.weight.dtype)
-        return self.projector(cond_emb)
+        encoder_out = self.projector(cond_emb)
+
+        # force_null=True (inference, the unconditional CFG branch) replaces
+        # every example with the learned null embedding.
+        if force_null:
+            return self.null_embedding.to(encoder_out.dtype).expand(
+                encoder_out.size(0), -1
+            )
+
+        # Condition dropout (training only): with prob cfg_dropout swap an
+        # example's projected neighbor embedding for the learned null embedding.
+        if self.training and self.cfg_dropout > 0.0:
+            drop = torch.rand(
+                encoder_out.size(0), device=encoder_out.device
+            ) < self.cfg_dropout
+            null = self.null_embedding.to(encoder_out.dtype).expand(
+                encoder_out.size(0), -1
+            )
+            encoder_out = torch.where(drop.unsqueeze(1), null, encoder_out)
+
+        return encoder_out
