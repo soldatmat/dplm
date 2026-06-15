@@ -17,6 +17,70 @@ from transformers.models.esm.modeling_esm import *
 from byprot.models import register_model
 
 
+class AdaLNSingleModulation(nn.Module):
+    """adaLN-single (PixArt-style) conditioning module.
+
+    ONE shared modulation MLP maps the per-class conditioning vector c
+    (shape [batch, hidden_size]) to 6 modulation vectors -- (shift, scale,
+    gate) for the attention sub-block and (shift, scale, gate) for the FFN
+    sub-block -- shared across all transformer layers. A learned, zero-init
+    per-layer offset table (one row of 6*hidden_size per layer) is ADDED to
+    the shared MLP output before the per-layer split, giving each layer its
+    own adaptation (this is the per-layer part of adaLN-single).
+
+    DPLM is deliberately time-agnostic (the network only ever sees input_ids;
+    "time" is implicit in the mask count), so the modulation depends ONLY on
+    the class vector -- there is no timestep term.
+
+    Zero-init: the final MLP Linear is zero-initialised (weight and bias) and
+    the per-layer offset table starts at zero, so at initialisation every gate
+    is 0 and `modulate(x, shift=0, scale=0) = x`. The modulation is therefore
+    an exact no-op at init and the model reproduces the unconditional
+    pretrained behaviour -- critical (adaLN-zero) for stable finetuning of a
+    frozen backbone.
+    """
+
+    def __init__(self, hidden_size, num_layers, bottleneck_rank=64):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.bottleneck_rank = bottleneck_rank
+
+        # Shared modulation MLP: Linear(H -> r) -> SiLU -> Linear(r -> 6*H).
+        self.shared_modulation = nn.Sequential(
+            nn.Linear(hidden_size, bottleneck_rank),
+            nn.SiLU(),
+            nn.Linear(bottleneck_rank, 6 * hidden_size),
+        )
+
+        # Learned per-layer offset table, zero-initialised. Added to the shared
+        # MLP output before splitting into the 6 modulation vectors.
+        self.layer_offsets = nn.Parameter(
+            torch.zeros(num_layers, 6 * hidden_size)
+        )
+
+        # Zero-init the final Linear so the whole modulation is a no-op at init.
+        nn.init.zeros_(self.shared_modulation[-1].weight)
+        nn.init.zeros_(self.shared_modulation[-1].bias)
+
+    def forward(self, conditioning_vector):
+        # conditioning_vector: [batch, hidden_size]
+        # returns: [batch, num_layers, 6, hidden_size]
+        shared = self.shared_modulation(conditioning_vector)  # [B, 6*H]
+        # broadcast-add the per-layer offsets: [B, 1, 6H] + [1, L, 6H]
+        per_layer = shared.unsqueeze(1) + self.layer_offsets.unsqueeze(0)
+        batch = conditioning_vector.size(0)
+        return per_layer.view(batch, self.num_layers, 6, self.hidden_size)
+
+
+def modulate(x, shift, scale):
+    """adaLN modulation: x * (1 + scale) + shift.
+
+    shift/scale are [batch, hidden_size]; x is [batch, seq_len, hidden_size].
+    """
+    return x * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+
+
 class ModifiedEsmSelfAttention(EsmSelfAttention):
     def forward(
         self,
@@ -135,6 +199,74 @@ class ModifiedEsmLayer(EsmLayer):
             config.hidden_size, eps=config.layer_norm_eps
         )
 
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        head_mask=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        past_key_value=None,
+        output_attentions=False,
+        adaln_modulation=None,
+    ):
+        # Standard (non-adaln) path: defer to the unmodified EsmLayer.forward.
+        if adaln_modulation is None:
+            return super().forward(
+                hidden_states,
+                attention_mask=attention_mask,
+                head_mask=head_mask,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_attention_mask=encoder_attention_mask,
+                past_key_value=past_key_value,
+                output_attentions=output_attentions,
+            )
+
+        # adaLN-single path. ESM is PRE-LayerNorm: each sub-block computes
+        #   h = h + SubLayer(LayerNorm(h)),
+        # where EsmAttention applies self.LayerNorm to its input before
+        # attention and EsmSelfOutput/EsmOutput add the residual WITHOUT a LN.
+        # We insert modulation as
+        #   h = h + gate * SubLayer(modulate(LayerNorm(h), shift, scale)).
+        # adaln_modulation: [batch, 6, hidden_size] for THIS layer, split as
+        # (shift_attn, scale_attn, gate_attn, shift_ffn, scale_ffn, gate_ffn).
+        (
+            shift_attn,
+            scale_attn,
+            gate_attn,
+            shift_ffn,
+            scale_ffn,
+            gate_ffn,
+        ) = adaln_modulation.unbind(dim=1)
+
+        # ---- Attention sub-block ----
+        attn = self.attention
+        normed = attn.LayerNorm(hidden_states)
+        normed = modulate(normed, shift_attn, scale_attn)
+        self_attention_outputs = attn.self(
+            normed,
+            attention_mask,
+            head_mask,
+            output_attentions=output_attentions,
+        )
+        # EsmSelfOutput.forward(hidden, input) = dropout(dense(hidden)) + input;
+        # call dense+dropout WITHOUT the residual so the gate scales the
+        # sub-layer contribution only, then add the gated residual ourselves.
+        attn_delta = attn.output.dropout(attn.output.dense(self_attention_outputs[0]))
+        hidden_states = hidden_states + gate_attn.unsqueeze(1) * attn_delta
+        outputs = self_attention_outputs[1:]
+
+        # ---- FFN sub-block ----
+        normed = self.LayerNorm(hidden_states)
+        normed = modulate(normed, shift_ffn, scale_ffn)
+        intermediate_output = self.intermediate(normed)
+        # EsmOutput.forward(hidden, input) = dropout(dense(hidden)) + input.
+        ffn_delta = self.output.dropout(self.output.dense(intermediate_output))
+        layer_output = hidden_states + gate_ffn.unsqueeze(1) * ffn_delta
+
+        outputs = (layer_output,) + outputs
+        return outputs
+
 
 class ModifiedEsmEncoder(EsmEncoder):
     def __init__(self, config):
@@ -147,6 +279,112 @@ class ModifiedEsmEncoder(EsmEncoder):
             config.hidden_size, eps=config.layer_norm_eps
         )
         self.gradient_checkpointing = False
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        head_mask=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        past_key_values=None,
+        use_cache=None,
+        output_attentions=False,
+        output_hidden_states=False,
+        return_dict=True,
+        adaln_modulation=None,
+    ):
+        # Mirror of transformers (4.39.2) EsmEncoder.forward, with the only
+        # addition being the per-layer adaln_modulation passthrough. When
+        # adaln_modulation is None the behaviour is identical to the parent
+        # (every layer's ModifiedEsmLayer.forward then defers to EsmLayer).
+        # adaln_modulation, when given, has shape [B, num_layers, 6, H]; layer
+        # i receives adaln_modulation[:, i] of shape [B, 6, H].
+        if self.gradient_checkpointing and self.training:
+            if use_cache:
+                logger.warning_once(
+                    "`use_cache=True` is incompatible with `config.gradient_checkpointing=True`. Setting "
+                    "`use_cache=False`..."
+                )
+                use_cache = False
+        all_hidden_states = () if output_hidden_states else None
+        all_self_attentions = () if output_attentions else None
+        all_cross_attentions = (
+            () if output_attentions and self.config.add_cross_attention else None
+        )
+
+        next_decoder_cache = () if use_cache else None
+        for i, layer_module in enumerate(self.layer):
+            if output_hidden_states:
+                all_hidden_states = all_hidden_states + (hidden_states,)
+
+            layer_head_mask = head_mask[i] if head_mask is not None else None
+            past_key_value = (
+                past_key_values[i] if past_key_values is not None else None
+            )
+            layer_adaln_modulation = (
+                adaln_modulation[:, i] if adaln_modulation is not None else None
+            )
+
+            if self.gradient_checkpointing and self.training:
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.__call__,
+                    hidden_states,
+                    attention_mask,
+                    layer_head_mask,
+                    encoder_hidden_states,
+                    encoder_attention_mask,
+                    past_key_value,
+                    output_attentions,
+                    layer_adaln_modulation,
+                )
+            else:
+                layer_outputs = layer_module(
+                    hidden_states,
+                    attention_mask,
+                    layer_head_mask,
+                    encoder_hidden_states,
+                    encoder_attention_mask,
+                    past_key_value,
+                    output_attentions,
+                    adaln_modulation=layer_adaln_modulation,
+                )
+
+            hidden_states = layer_outputs[0]
+            if use_cache:
+                next_decoder_cache = next_decoder_cache + (layer_outputs[-1],)
+            if output_attentions:
+                all_self_attentions = all_self_attentions + (layer_outputs[1],)
+                if self.config.add_cross_attention:
+                    all_cross_attentions = all_cross_attentions + (
+                        layer_outputs[2],
+                    )
+
+        if self.emb_layer_norm_after:
+            hidden_states = self.emb_layer_norm_after(hidden_states)
+
+        if output_hidden_states:
+            all_hidden_states = all_hidden_states + (hidden_states,)
+
+        if not return_dict:
+            return tuple(
+                v
+                for v in [
+                    hidden_states,
+                    next_decoder_cache,
+                    all_hidden_states,
+                    all_self_attentions,
+                    all_cross_attentions,
+                ]
+                if v is not None
+            )
+        return BaseModelOutputWithPastAndCrossAttentions(
+            last_hidden_state=hidden_states,
+            past_key_values=next_decoder_cache,
+            hidden_states=all_hidden_states,
+            attentions=all_self_attentions,
+            cross_attentions=all_cross_attentions,
+        )
 
 
 class ModifiedEsmModel(EsmModel):
@@ -165,6 +403,16 @@ class ModifiedEsmModel(EsmModel):
         )
 
         self.conditioning_mode = conditioning_mode
+
+        if conditioning_mode == "adaln":
+            # adaLN-single (PixArt-style) modulation. The conditioning vector is
+            # the per-class learned embedding (640-d) handed in as
+            # encoder_hidden_states; no timestep term (DPLM is time-agnostic).
+            self.adaln_modulation_module = AdaLNSingleModulation(
+                config.hidden_size,
+                config.num_hidden_layers,
+                bottleneck_rank=getattr(config, "adaln_bottleneck_rank", 64),
+            )
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -303,6 +551,19 @@ class ModifiedEsmModel(EsmModel):
             class_token_encoder_attention = encoder_extended_attention_mask[:,0].unsqueeze(1)
             encoder_extended_attention_mask = torch.cat([class_token_encoder_attention, encoder_extended_attention_mask], dim=1)
 
+        adaln_modulation = None
+        if self.conditioning_mode == "adaln":
+            # The incoming encoder_hidden_states is the per-class (or null) class
+            # embedding of shape [B, H]; it is the adaLN conditioning vector, NOT
+            # a token to prepend and NOT a cross-attention key/value source.
+            assert encoder_hidden_states.shape[-1] == self.config.hidden_size, (
+                "adaLN conditioning requires the conditioning vector dim to equal "
+                f"hidden_size ({self.config.hidden_size}), got "
+                f"{encoder_hidden_states.shape[-1]}. Set encoder.embedding_dim to "
+                "the backbone hidden_size."
+            )
+            adaln_modulation = self.adaln_modulation_module(encoder_hidden_states)
+
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
@@ -314,6 +575,7 @@ class ModifiedEsmModel(EsmModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            adaln_modulation=adaln_modulation,
         )
 
         if self.conditioning_mode == "prepend":
@@ -344,11 +606,14 @@ class ModifiedEsmModel(EsmModel):
 
 @register_model("dplm_esm")
 class EsmForDPLM(EsmForMaskedLM):
-    def __init__(self, config, dropout=0.1, conditioning_mode=None):
+    def __init__(self, config, dropout=0.1, conditioning_mode=None, adaln_bottleneck_rank=None):
         tokenizer = AutoTokenizer.from_pretrained(config._name_or_path)
         config.hidden_dropout_prob = dropout
 
         config.cls_token_id = tokenizer._token_to_id[str(tokenizer._cls_token)]
+
+        if adaln_bottleneck_rank is not None:
+            config.adaln_bottleneck_rank = adaln_bottleneck_rank
 
         EsmPreTrainedModel.__init__(self, config)
         self.esm = ModifiedEsmModel(config, add_pooling_layer=False, conditioning_mode=conditioning_mode)

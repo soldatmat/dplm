@@ -38,7 +38,9 @@ class DPLMWithGlobalAdapterConfig:
     num_diffusion_timesteps: int = field(default=100)
     adapter_dropout: float = field(default=0.1)
     encoder_d_model: int = field(default=512)
-    encoder_conditioning_mode: str = field(default="cross_attention")  # cross_attention, expanded_cross_attention, sum, ignore
+    encoder_conditioning_mode: str = field(default="cross_attention")  # cross_attention, expanded_cross_attention, sum, ignore, prepend, adaln
+    # adaLN-single bottleneck rank (only used when encoder_conditioning_mode == 'adaln').
+    adaln_bottleneck_rank: int = field(default=64)
     adapter_intermediate_size: int = field(default=320)
     adapter_hidden_size: int = field(default=80)
     dplm_name: str = field(default="")
@@ -68,12 +70,20 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
     @classmethod
     def from_pretrained(cls, cfg):
         net_override = {"conditioning_mode": cfg.encoder_conditioning_mode}
+        # adaLN-single: forward the bottleneck rank so EsmForDPLM.__init__ sets it
+        # on the HF config BEFORE ModifiedEsmModel builds the modulation module
+        # (which reads it via getattr(config, 'adaln_bottleneck_rank', 64)).
+        if cfg.encoder_conditioning_mode == "adaln":
+            net_override["adaln_bottleneck_rank"] = getattr(cfg, "adaln_bottleneck_rank", 64)
         net = DiffusionProteinLanguageModel.from_pretrained(cfg.dplm_name, net_override=net_override, from_huggingface=cfg.from_huggingface).net
 
         del net.esm.contact_head
 
         # Add conditioning adapter to the architecture
-        if cfg.encoder_conditioning_mode == "prepend":
+        if cfg.encoder_conditioning_mode in ("prepend", "adaln"):
+            # Neither prepend nor adaln swaps the last layer or uses a
+            # GlobalAdapterLayer: prepend injects a class token, adaln injects
+            # per-layer modulation built inside ModifiedEsmModel.
             pass
         else:
             # change net.last_layer to GlobalAdapterLayer
@@ -116,7 +126,26 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
         dplm_adapter = cls(cfg, net)
 
         # Freeze parameters
-        if cfg.encoder_conditioning_mode == "prepend":
+        if cfg.encoder_conditioning_mode == "adaln":
+            # Frozen backbone: freeze EVERY decoder param, then re-enable only
+            # the adaLN-single modulation module (shared MLP + per-layer offset
+            # table). The per-class ClassEncoder is a SIBLING module on DPLMClass
+            # (DPLMClass.encoder, not inside this adapter) and its trainability is
+            # governed there by ClassEncoderConfig.frozen / null_embedding.
+            trainable, frozen = 0, 0
+            for pname, param in dplm_adapter.named_parameters():
+                if "adaln_modulation_module" in pname:
+                    param.requires_grad = True
+                    trainable += param.numel()
+                else:
+                    param.requires_grad = False
+                    frozen += param.numel()
+            logger.info(
+                f"adaLN-single conditioning: {trainable} trainable decoder params "
+                f"(adaln_modulation_module.*), {frozen} frozen backbone params. "
+                "Class encoder trainability is set separately on DPLMClass.encoder."
+            )
+        elif cfg.encoder_conditioning_mode == "prepend":
             pass
         else:
             for pname, param in dplm_adapter.named_parameters():
