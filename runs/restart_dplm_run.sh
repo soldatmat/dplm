@@ -100,12 +100,12 @@ read_source_overrides_args() {
             if ($0 ~ /^paths\./) next
             # model.lora.lora_target_module is the one key whose YAML value
             # contains parens; replaying it verbatim loses the single-quote
-            # wrapping during bash argv assembly and crashes Hydra with
-            # "extraneous input '('". read_source_model_overrides emits it
-            # separately with proper "'...'" quoting, so skip it here. Every
-            # other model.lora.* line (including ++model.lora.lora_alpha=2
-            # which force-adds the key when the target yaml omits it) must
-            # still be replayed.
+            # wrapping during bash argv assembly and crashes Hydra with an
+            # extraneous-input parse error. read_source_model_overrides emits
+            # this key separately with proper quoting, so skip it here. Every
+            # other model.lora.* line, including the plus-prefixed
+            # ++model.lora.lora_alpha=2 that force-adds the key when the target
+            # yaml omits it, must still be replayed.
             if ($0 ~ /^\+*model\.lora\.lora_target_module=/) next
             print
         }
