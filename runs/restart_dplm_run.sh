@@ -98,6 +98,12 @@ read_source_overrides_args() {
             if ($0 ~ /^experiment=/) next
             if ($0 ~ /^name=/) next
             if ($0 ~ /^paths\./) next
+            # model.lora.* (and ++model.lora.*) are emitted separately by
+            # read_source_model_overrides with proper Hydra quoting for values
+            # containing parens/special chars. Replaying them from overrides.yaml
+            # as bare lines loses the single-quote wrapping and crashes Hydra at
+            # parse time (e.g. lora_target_module=(esm.encoder.layer...)).
+            if ($0 ~ /^\+*model\.lora\./) next
             print
         }
     ' "$overrides_file"
