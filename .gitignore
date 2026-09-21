@@ -163,3 +163,42 @@ generation-results/
 data-bin/scaffolding-pdbs/*.pdb
 temp.ipynb
 # run/
+
+# ==========================================================================
+# Bulk run/deck output (2026-09-21 sweep). None of this belongs in the fork;
+# what is worth keeping is archived on pluskal.nas instead. See the umbrella
+# repo's docs/NAS_ARCHIVE_MAP.md.
+# ==========================================================================
+
+# Steering/CFG/adaLN class-predictor eval output backing the deck slides.
+# 624 M / 339 files -> NAS projects/dplm/class_predictor_2026-06-11/ (byte-verified).
+# The folder's own README.md stays tracked so the archive is discoverable.
+run/class_predictor/*
+!run/class_predictor/README.md
+
+# adaLN architecture-slide build dir: ~700 KB of real build code, ~857 M of
+# deck churn (6 near-duplicate .pptx + their unpacked trees). Track the builders,
+# ignore the artifacts -- they rebuild from the .js scripts via `npm install`.
+_adaln_arch_slide/*
+!_adaln_arch_slide/*.js
+!_adaln_arch_slide/package.json
+!_adaln_arch_slide/package-lock.json
+
+# Smaller analysis/eval output dirs from the same period.
+_adaln_early_readout/
+_adaln_40k_reseed/
+analysis/dft_disco_comparison/
+analysis/dplm650_vs_disco_priors/
+plot/length_audit/
+plot/*.png
+plot/embedding_space/*.png
+
+# MARTS-DB release snapshots (33 M each). Regenerable via the `marts-db` skill,
+# but NOTE 2026-07-31/ is the cited SMILES provenance for a shipped deck, so it
+# is archived at NAS data/MARTS-DB/2026-07-31/dplm_snapshot_copy/ rather than
+# treated as disposable.
+data-bin/MARTS-DB/*/
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store
