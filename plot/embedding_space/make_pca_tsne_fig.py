@@ -28,7 +28,7 @@ sys.path.insert(0, "/Users/soldatmat/Documents/terpene_synthases/tps-first-cycli
 from knn_first_cyclization import load_reference, N_CLASSES  # noqa: E402
 
 OUT_PATHS = [
-    Path("/Users/soldatmat/Documents/terpene_synthases/dplm/run/class_predictor/"
+    Path("/Users/soldatmat/Documents/terpene_synthases/projects/dplm/run/class_predictor/"
          "slide306_eval/train_tps_pca_tsne.png"),
     Path("/Volumes/data/Users/Matous/terpene_synthases/output/dplm/comparison/"
          "knn_first_cyclization_fidelity_2026-06-09/train_tps_pca_tsne.png"),

@@ -12,7 +12,15 @@ rest of the generated-sequence eval data:
     ../../run/class_predictor/slide306_eval/                 # inputs + ESM/overlay PNGs
     ../../run/class_predictor/slide306_eval/similarity_data/ # seq/struct matrices + maps
 
-The scripts reference those by absolute path, so they run from anywhere. The
+The scripts reference those by absolute path, so they run from anywhere.
+⚠ **Those absolute paths were broken from 2026-08-04 to 2026-09-21** — `dplm/` moved to
+`projects/dplm/` and 25 hardcoded paths across 17 scripts were never updated. Fixed now; if you
+add a script here, prefer a path relative to this file so the next move cannot break it silently.
+
+⚠ **The inputs/outputs below are git-ignored and now archived**, not present in a fresh clone:
+`run/class_predictor/` (624 M) lives on pluskal.nas at
+`terpene_synthases/projects/dplm/class_predictor_2026-06-11/` (byte-verified 2026-09-21).
+Restore it from there before re-running anything in this dir. The
 class labels / reference embeddings come from the **canonical** standalone repo
 `../../../tps-first-cyclization-knn` (its bundled `data/` is md5-identical to the
 dplm data-bin copy). Run everything with the local base `/opt/miniconda3` python3

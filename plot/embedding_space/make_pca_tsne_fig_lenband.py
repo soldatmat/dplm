@@ -37,13 +37,13 @@ from make_pca_tsne_fig import (  # noqa: E402
     TYPE_ORDER,
 )
 
-CSV_PATH = Path("/Users/soldatmat/Documents/terpene_synthases/dplm/data-bin/"
+CSV_PATH = Path("/Users/soldatmat/Documents/terpene_synthases/projects/dplm/data-bin/"
                 "MARTS-DB/2026-04-12/TPS_first_cyclization.csv")
 
 LEN_LO, LEN_HI = 280, 420  # ~ one structural domain
 
 OUT_PATHS = [
-    Path("/Users/soldatmat/Documents/terpene_synthases/dplm/run/class_predictor/"
+    Path("/Users/soldatmat/Documents/terpene_synthases/projects/dplm/run/class_predictor/"
          "slide306_eval/train_tps_pca_tsne_lenband.png"),
     Path("/Volumes/data/Users/Matous/terpene_synthases/output/dplm/comparison/"
          "knn_first_cyclization_fidelity_2026-06-09/train_tps_pca_tsne_lenband.png"),

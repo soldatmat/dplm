@@ -39,7 +39,7 @@ from sklearn.manifold import TSNE  # noqa: E402
 # This script lives in dplm/plot/embedding_space/, but its input CSVs and output
 # PNGs live with the rest of the generated-seq eval data (slide306_eval/).
 HERE = Path(__file__).resolve().parent
-DATA_DIR = Path("/Users/soldatmat/Documents/terpene_synthases/dplm/run/"
+DATA_DIR = Path("/Users/soldatmat/Documents/terpene_synthases/projects/dplm/run/"
                 "class_predictor/slide306_eval")
 CLASS0_EMB = DATA_DIR / "slide306_10runs_combined_embeddings_mean.csv"
 CLASS1_EMB = DATA_DIR / "class1_mini_combined_embeddings_mean.csv"

@@ -18,7 +18,7 @@ from pptx import Presentation
 from pptx.util import Inches
 
 PPTX = "/Users/soldatmat/Documents/terpene_synthases/presentation/dplm.pptx"
-FIG = ("/Users/soldatmat/Documents/terpene_synthases/dplm/run/class_predictor/"
+FIG = ("/Users/soldatmat/Documents/terpene_synthases/projects/dplm/run/class_predictor/"
        "slide306_eval/train_tps_pca_tsne.png")
 TITLE_PREFIX = "Training TPSs in DPLM-150m embedding space"
 ANNOTATION_SHAPE_NAME = "TextBox 5"

@@ -17,7 +17,7 @@ from pptx import Presentation
 from pptx.util import Inches
 
 PPTX = "/Users/soldatmat/Documents/terpene_synthases/presentation/dplm.pptx"
-FIG = ("/Users/soldatmat/Documents/terpene_synthases/dplm/run/class_predictor/"
+FIG = ("/Users/soldatmat/Documents/terpene_synthases/projects/dplm/run/class_predictor/"
        "slide306_eval/train_tps_pca_tsne.png")
 TEMPLATE_SLIDE_INDEX = 232
 LAYOUT_INDEX = 1

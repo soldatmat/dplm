@@ -29,14 +29,14 @@ import sys  # noqa: E402
 sys.path.insert(0, "/Users/soldatmat/Documents/terpene_synthases/tps-first-cyclization-knn")
 from knn_first_cyclization import load_reference  # noqa: E402
 
-CSV = Path("/Users/soldatmat/Documents/terpene_synthases/dplm/data-bin/"
+CSV = Path("/Users/soldatmat/Documents/terpene_synthases/projects/dplm/data-bin/"
            "MARTS-DB/2026-04-12/TPS_first_cyclization.csv")
 BLUE = "#1f77b4"
 TARGETS = [0, 1]
 LO, HI = 280, 420
 
 # Best-effort NAS mirror (often unmounted off-VPN).
-NAS_DIR = Path("/Volumes/data/Users/Matous/terpene_synthases/dplm/run/"
+NAS_DIR = Path("/Volumes/data/Users/Matous/terpene_synthases/projects/dplm/run/"
                "class_predictor/slide306_eval")
 
 

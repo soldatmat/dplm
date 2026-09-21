@@ -39,7 +39,7 @@ from make_pca_tsne_fig import build_class_colors, make_palette, TYPE_ORDER  # no
 sys.path.insert(0, "/Users/soldatmat/Documents/terpene_synthases/tps-first-cyclization-knn")
 from knn_first_cyclization import load_reference, N_CLASSES  # noqa: E402
 
-DATA = Path("/Users/soldatmat/Documents/terpene_synthases/dplm/run/"
+DATA = Path("/Users/soldatmat/Documents/terpene_synthases/projects/dplm/run/"
             "class_predictor/slide306_eval/similarity_data")
 FOLDSEEK_TSV = DATA / "foldseek_marts_self_alignments.tsv"   # all-pairs
 MMSEQS_TSV = DATA / "mmseqs_marts_allvall.tsv"               # all-pairs

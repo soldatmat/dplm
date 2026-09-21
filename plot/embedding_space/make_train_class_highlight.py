@@ -27,7 +27,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 sys.path.insert(0, "/Users/soldatmat/Documents/terpene_synthases/tps-first-cyclization-knn")
 from knn_first_cyclization import load_reference  # noqa: E402
 
-OUTDIR = Path("/Users/soldatmat/Documents/terpene_synthases/dplm/run/"
+OUTDIR = Path("/Users/soldatmat/Documents/terpene_synthases/projects/dplm/run/"
               "class_predictor/slide306_eval")
 GOLD = "#C9A227"
 GRAY = "0.8"
