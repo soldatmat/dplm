@@ -68,6 +68,27 @@ def parse_args():
     # off / unchanged behaviour. Only used by DPLMClass models trained with a
     # learned null embedding (cfg_dropout > 0).
     parser.add_argument("--guidance_w", type=float, default=0.0)
+    # A3 same-class-neighbor conditioning source (NeighborEncoder models only).
+    #   medoid  (default) -> let the encoder fall back to the per-class MEDOID
+    #            embedding (cond_emb is None), the original inference behaviour.
+    #   random  -> for EACH generated sequence supply a RANDOM same-class enzyme's
+    #            640-d `emb` row (resampled independently per sequence) as cond_emb,
+    #            sourced from the neighbor artifact filtered to the conditioned
+    #            class via the MARTS-DB first-cyclization CSV.
+    parser.add_argument(
+        "--neighbor_cond_source",
+        type=str,
+        default="medoid",
+        choices=["medoid", "random"],
+    )
+    # Path to the neighbor_conditioning_emb.pt artifact: a torch dict with
+    # keys `emb` [N_enz,640], `enzyme_ids` (list aligned to emb rows),
+    # `class_medoid` [22,640]. Required when --neighbor_cond_source random.
+    parser.add_argument("--neighbor_artifact_path", type=str, default=None)
+    # Path to the MARTS-DB first-cyclization CSV (columns Enzyme_marts_ID,
+    # First_cyclization_product_id) providing per-enzyme class membership.
+    # Required when --neighbor_cond_source random.
+    parser.add_argument("--class_csv", type=str, default=None)
     parser.add_argument("--batch_lens_together", default=False, action=argparse.BooleanOptionalAction)
     parser.add_argument("--batch_size", type=int, default=32)
     # inpainting
@@ -108,6 +129,62 @@ def load_model(args):
     return model, tokenizer
 
 
+def build_neighbor_random_pools(args):
+    """Build {class_id: Tensor[n_class_enz, 640]} of per-class neighbor `emb`
+    rows for --neighbor_cond_source random.
+
+    Filters the neighbor artifact's `emb` rows to each conditioned class via
+    the MARTS-DB CSV's per-enzyme First_cyclization_product_id. Attaches the
+    result to args.neighbor_random_pools so generation.py can resample a random
+    same-class row per generated sequence.
+    """
+    import pandas as pd
+
+    if not args.neighbor_artifact_path:
+        raise ValueError(
+            "--neighbor_cond_source random requires --neighbor_artifact_path."
+        )
+    if not args.class_csv:
+        raise ValueError(
+            "--neighbor_cond_source random requires --class_csv."
+        )
+
+    artifact = torch.load(args.neighbor_artifact_path, map_location="cpu")
+    emb = artifact["emb"].float()  # [N_enz, 640]
+    enzyme_ids = list(artifact["enzyme_ids"])  # aligned 1:1 with emb rows
+    assert emb.shape[0] == len(enzyme_ids), (
+        f"emb rows {emb.shape[0]} != enzyme_ids {len(enzyme_ids)}"
+    )
+
+    csv = pd.read_csv(args.class_csv)
+    # One class label per enzyme (dedup multi-product rows; class is per-enzyme).
+    enz_to_class = (
+        csv.drop_duplicates("Enzyme_marts_ID")
+        .set_index("Enzyme_marts_ID")["First_cyclization_product_id"]
+        .to_dict()
+    )
+
+    # Conditioned class set (flatten args.class_ids).
+    cond_classes = sorted(set(int(c) for c in (args.class_ids or [])))
+    pools = {}
+    for c in cond_classes:
+        row_idx = [
+            i
+            for i, eid in enumerate(enzyme_ids)
+            if enz_to_class.get(eid, None) == c
+        ]
+        if not row_idx:
+            raise ValueError(
+                f"No neighbor-artifact enzymes found for conditioned class {c}."
+            )
+        pools[c] = emb[torch.tensor(row_idx, dtype=torch.long)]
+        print(
+            f"[neighbor random] class {c}: {len(row_idx)} same-class enzyme "
+            f"embeddings available for resampling"
+        )
+    args.neighbor_random_pools = pools
+
+
 def main():
     args = parse_args()
 
@@ -115,9 +192,18 @@ def main():
         torch.manual_seed(args.seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(args.seed)
-    
+
     model, tokenizer = load_model(args)
-    
+
+    args.neighbor_random_pools = None
+    if args.neighbor_cond_source == "random":
+        if args.architecture != "DPLMClass":
+            raise ValueError(
+                "--neighbor_cond_source random is only valid with "
+                "--architecture DPLMClass."
+            )
+        build_neighbor_random_pools(args)
+
     generate(args, model, tokenizer)
 
 

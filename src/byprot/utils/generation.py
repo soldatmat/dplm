@@ -135,6 +135,22 @@ def generate_iteration(args, model, tokenizer, input_tokens, seq_len, class_ids=
                 "prev_tokens": input_tokens,
                 "class_ids": class_ids,
             }
+            # A3 same-class-neighbor RANDOM conditioning: for each sequence in
+            # this batch, draw an INDEPENDENT random same-class enzyme `emb` row
+            # and supply it as cond_emb [batch, 640]. This overrides the
+            # encoder's default per-class MEDOID fallback (which fires only when
+            # cond_emb is None). --neighbor_cond_source medoid leaves cond_emb
+            # unset, preserving the original behaviour.
+            pools = getattr(args, "neighbor_random_pools", None)
+            if getattr(args, "neighbor_cond_source", "medoid") == "random" and pools:
+                cond_rows = []
+                for cid in class_ids.tolist():
+                    pool = pools[int(cid)]  # [n_class_enz, 640]
+                    j = torch.randint(0, pool.shape[0], (1,)).item()
+                    cond_rows.append(pool[j])
+                batch["cond_emb"] = torch.stack(cond_rows, dim=0).to(
+                    class_ids.device
+                )
             output_tokens, output_scores = model.generate(
                 batch=batch,
                 tokenizer=tokenizer,
