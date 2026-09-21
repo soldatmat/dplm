@@ -39,6 +39,7 @@ class MartsDBClassDataModule(LightningDataModule):
         alphabet=None,
         neighbor_conditioning: bool = False,
         neighbor_artifact_path: str = None,
+        self_conditioning: bool = False,
     ):
         super().__init__()
 
@@ -71,6 +72,7 @@ class MartsDBClassDataModule(LightningDataModule):
                 class_column=self.class_column,
                 neighbor_conditioning=self.hparams.neighbor_conditioning,
                 neighbor_artifact_path=self.hparams.neighbor_artifact_path,
+                self_conditioning=self.hparams.self_conditioning,
             )
             self.valid_dataset = MartsDBClassDataset(
                 csv_file=self.hparams.data_path,
@@ -79,6 +81,7 @@ class MartsDBClassDataModule(LightningDataModule):
                 class_column=self.class_column,
                 neighbor_conditioning=self.hparams.neighbor_conditioning,
                 neighbor_artifact_path=self.hparams.neighbor_artifact_path,
+                self_conditioning=self.hparams.self_conditioning,
             )
             if self.hparams.mini_run:
                 mini_size = 100
@@ -100,6 +103,7 @@ class MartsDBClassDataModule(LightningDataModule):
                 class_column=self.class_column,
                 neighbor_conditioning=self.hparams.neighbor_conditioning,
                 neighbor_artifact_path=self.hparams.neighbor_artifact_path,
+                self_conditioning=self.hparams.self_conditioning,
             )
         else:
             raise ValueError(f"Invalid stage: {stage}.")

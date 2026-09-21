@@ -195,6 +195,7 @@ class MartsDBClassDataset(Dataset):
         id_column: str = "Enzyme_marts_ID",
         neighbor_conditioning: bool = False,
         neighbor_artifact_path: str = None,
+        self_conditioning: bool = False,
     ):
         self.csv_file = csv_file
         self.max_len = max_len
@@ -203,6 +204,11 @@ class MartsDBClassDataset(Dataset):
         self.split_column = split_column
         self.id_column = id_column
         self.neighbor_conditioning = neighbor_conditioning
+        # Self-conditioning: condition on the enzyme's OWN precomputed embedding
+        # (vs neighbor_conditioning = a DIFFERENT same-class enzyme's). Shares the
+        # same artifact (emb table + per-class medoid for inference/fallback).
+        self.self_conditioning = self_conditioning
+        _use_cond = self.neighbor_conditioning or self.self_conditioning
 
         data = pd.read_csv(self.csv_file)
         if split is not None:
@@ -210,7 +216,7 @@ class MartsDBClassDataset(Dataset):
         # A3 Option A keeps the enzyme id so a same-class neighbor can be
         # sampled and its precomputed embedding looked up.
         keep_cols = [sequence_column, class_column]
-        if self.neighbor_conditioning:
+        if _use_cond:
             keep_cols = [id_column] + keep_cols
         data = data[keep_cols].reset_index(drop=True)
         self.data = data
@@ -224,8 +230,8 @@ class MartsDBClassDataset(Dataset):
 
         log.info(f"Dataset size: {len(self.data)}")
 
-        # ---- A3 Option A: same-class-neighbor exemplar conditioning ----
-        if self.neighbor_conditioning:
+        # ---- A3 Option A: same-class-neighbor / self exemplar conditioning ----
+        if _use_cond:
             if not neighbor_artifact_path:
                 raise ValueError(
                     "neighbor_conditioning=True requires neighbor_artifact_path "
@@ -268,6 +274,15 @@ class MartsDBClassDataset(Dataset):
         neighbor = candidates[np.random.randint(len(candidates))]
         return self._neighbor_emb[self._id2row[neighbor]]
 
+    def _self_emb(self, idx):
+        """Embedding of the SAME enzyme (self-conditioning). Falls back to the
+        class medoid if this enzyme has no precomputed embedding."""
+        own_id = self.data.iloc[idx][self.id_column]
+        row = self._id2row.get(own_id)
+        if row is None:
+            return self._class_medoid[self.data.iloc[idx][self.class_column]]
+        return self._neighbor_emb[row]
+
     def __getitem__(self, idx):
         consensus = self.data.iloc[idx][self.sequence_column]
         if len(consensus) - self.max_len > 0:
@@ -279,6 +294,10 @@ class MartsDBClassDataset(Dataset):
         consensus = consensus[start:stop]
 
         class_id = self.data.iloc[idx][self.class_column]
+
+        if self.self_conditioning:
+            cond_emb = self._self_emb(idx)
+            return consensus, class_id, cond_emb
 
         if self.neighbor_conditioning:
             cond_emb = self._sample_neighbor_emb(idx, class_id)
