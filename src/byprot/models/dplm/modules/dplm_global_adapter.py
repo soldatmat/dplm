@@ -41,6 +41,10 @@ class DPLMWithGlobalAdapterConfig:
     encoder_conditioning_mode: str = field(default="cross_attention")  # cross_attention, expanded_cross_attention, sum, ignore, prepend, adaln
     # adaLN-single bottleneck rank (only used when encoder_conditioning_mode == 'adaln').
     adaln_bottleneck_rank: int = field(default=64)
+    # adaLN-single: 1-center the residual gates -> (1 + gate) so the frozen
+    # backbone is reproduced exactly at init (gate=1) instead of disabled
+    # (gate=0). Default False = original 0-centered behavior.
+    adaln_gate_one_centered: bool = field(default=False)
     adapter_intermediate_size: int = field(default=320)
     adapter_hidden_size: int = field(default=80)
     dplm_name: str = field(default="")
@@ -75,6 +79,7 @@ class DPLMWithConditionalGlobalAdapter(nn.Module):
         # (which reads it via getattr(config, 'adaln_bottleneck_rank', 64)).
         if cfg.encoder_conditioning_mode == "adaln":
             net_override["adaln_bottleneck_rank"] = getattr(cfg, "adaln_bottleneck_rank", 64)
+            net_override["adaln_gate_one_centered"] = getattr(cfg, "adaln_gate_one_centered", False)
         net = DiffusionProteinLanguageModel.from_pretrained(cfg.dplm_name, net_override=net_override, from_huggingface=cfg.from_huggingface).net
 
         del net.esm.contact_head
@@ -370,7 +375,12 @@ class GlobalAdapterLayer(nn.Module):
         encoder_attention_mask=None,
         past_key_value=None,
         output_attentions=False,
+        adaln_modulation=None,
     ):
+        # adaln_modulation is accepted to match the kwarg the ESM encoder now
+        # passes to every layer. Adapter conditioning (CA / miniCA) does not
+        # implement adaLN, so it is intentionally ignored — adaLN runs are
+        # prepend-based, and for non-adaLN adapter runs this is always None.
         # self-attention
         # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
         self_attn_past_key_value = (
@@ -503,7 +513,12 @@ class GlobalAdapterLayerMini(GlobalAdapterLayer):
         encoder_attention_mask=None,
         past_key_value=None,
         output_attentions=False,
+        adaln_modulation=None,
     ):
+        # adaln_modulation is accepted to match the kwarg the ESM encoder now
+        # passes to every layer. Adapter conditioning (CA / miniCA) does not
+        # implement adaLN, so it is intentionally ignored — adaLN runs are
+        # prepend-based, and for non-adaLN adapter runs this is always None.
         # self-attention
         # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
         self_attn_past_key_value = (

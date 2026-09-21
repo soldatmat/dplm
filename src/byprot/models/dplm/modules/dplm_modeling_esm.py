@@ -40,11 +40,17 @@ class AdaLNSingleModulation(nn.Module):
     frozen backbone.
     """
 
-    def __init__(self, hidden_size, num_layers, bottleneck_rank=64):
+    def __init__(self, hidden_size, num_layers, bottleneck_rank=64, gate_one_centered=False):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.bottleneck_rank = bottleneck_rank
+        # When True, the residual gates are 1-centered: the layer applies
+        # (1 + gate) * SubLayer(...). With zero-init that means gate=1 at init,
+        # so the FROZEN pretrained backbone is reproduced EXACTLY at step 0
+        # (instead of being switched off, as with the default 0-centered gate).
+        # Training then learns deviations rather than first re-opening the gates.
+        self.gate_one_centered = gate_one_centered
 
         # Shared modulation MLP: Linear(H -> r) -> SiLU -> Linear(r -> 6*H).
         self.shared_modulation = nn.Sequential(
@@ -70,7 +76,16 @@ class AdaLNSingleModulation(nn.Module):
         # broadcast-add the per-layer offsets: [B, 1, 6H] + [1, L, 6H]
         per_layer = shared.unsqueeze(1) + self.layer_offsets.unsqueeze(0)
         batch = conditioning_vector.size(0)
-        return per_layer.view(batch, self.num_layers, 6, self.hidden_size)
+        mod = per_layer.view(batch, self.num_layers, 6, self.hidden_size)
+        if self.gate_one_centered:
+            # 6-vector order is (shift_attn, scale_attn, gate_attn, shift_ffn,
+            # scale_ffn, gate_ffn); shift the two gate slices (2, 5) to be
+            # 1-centered so the layer's `gate * SubLayer(...)` becomes
+            # `(1 + gate) * SubLayer(...)` with no change to the layer code.
+            mod = mod.clone()
+            mod[:, :, 2, :] = mod[:, :, 2, :] + 1.0
+            mod[:, :, 5, :] = mod[:, :, 5, :] + 1.0
+        return mod
 
 
 def modulate(x, shift, scale):
@@ -412,6 +427,7 @@ class ModifiedEsmModel(EsmModel):
                 config.hidden_size,
                 config.num_hidden_layers,
                 bottleneck_rank=getattr(config, "adaln_bottleneck_rank", 64),
+                gate_one_centered=getattr(config, "adaln_gate_one_centered", False),
             )
 
         # Initialize weights and apply final processing
@@ -606,7 +622,8 @@ class ModifiedEsmModel(EsmModel):
 
 @register_model("dplm_esm")
 class EsmForDPLM(EsmForMaskedLM):
-    def __init__(self, config, dropout=0.1, conditioning_mode=None, adaln_bottleneck_rank=None):
+    def __init__(self, config, dropout=0.1, conditioning_mode=None, adaln_bottleneck_rank=None,
+                 adaln_gate_one_centered=None):
         tokenizer = AutoTokenizer.from_pretrained(config._name_or_path)
         config.hidden_dropout_prob = dropout
 
@@ -614,6 +631,8 @@ class EsmForDPLM(EsmForMaskedLM):
 
         if adaln_bottleneck_rank is not None:
             config.adaln_bottleneck_rank = adaln_bottleneck_rank
+        if adaln_gate_one_centered is not None:
+            config.adaln_gate_one_centered = adaln_gate_one_centered
 
         EsmPreTrainedModel.__init__(self, config)
         self.esm = ModifiedEsmModel(config, add_pooling_layer=False, conditioning_mode=conditioning_mode)
