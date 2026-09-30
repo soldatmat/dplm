@@ -19,7 +19,7 @@ research is the class-conditioning architectures (cross-attention "CA",
 - **Training / generation / embedding extraction run on Karolina (GPU)**, not
   locally. The git remote `karolina` *is* the cluster checkout:
   `karolina:/mnt/proj2/fta-26-15/documents/dplm`. SSH alias: `karolina.it4i.cz`.
-  SLURM account/project: `fta-26-15`. Conda env: `/mnt/proj2/fta-26-15/.conda/envs/dplm`
+  SLURM account: not hard-coded — comes from `$SBATCH_ACCOUNT` (set in the cluster `~/.bashrc`; currently `open-38-60`). Storage/conda env (legacy project dir, still valid): `/mnt/proj2/fta-26-15/.conda/envs/dplm`
   (also `enzyme_explorer`, `tps_eval`). See the **dplm-run**, **karolina-connect**,
   and **slurm-hpc** skills.
 - **Plotting / deck / analysis run locally on the Mac** using the base
