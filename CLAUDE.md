@@ -67,12 +67,14 @@ research is the class-conditioning architectures (cross-attention "CA",
 
 ## Conventions
 
-- **Project history & run logs: repo first (policy 2026-10-01).** Record decisions/analysis
-  in the umbrella repo (`../../docs/HISTORY.md` for the narrative,
-  `../../docs/state/MODEL_SELECTION_STATE.md` for the DPLM variant-selection state,
-  `../../PLAN_AND_OPEN_TASKS.md` for the board). The Obsidian vault
-  (`../../notes/terpene_generation/History.md`, `Runs.md`; skills **obsidian-history-notes** /
-  **obsidian-run-notes**) is only a fallback and the home of pre-2026-10-01 entries.
+- **Project history & run logs: repo first (policy 2026-10-01).** Run-level notes and analysis go
+  in the umbrella repo's effort folder concerned (e.g. `../../projects/model_exploration/finetuning_models/`,
+  or `../../docs/state/MODEL_SELECTION_STATE.md` for the DPLM variant-selection state); there is no
+  global run ledger. The umbrella `../../docs/HISTORY.md` is a lightweight high-level history and
+  takes only milestone entries (effort opened/closed/pivoted, headline result confirmed or retracted,
+  wet-lab order or results, direction change); `../../PLAN_AND_OPEN_TASKS.md` is the board. The
+  Obsidian vault (skills **obsidian-history-notes** / **obsidian-run-notes**) is only a fallback; its
+  pre-2026-10-01 diaries are archived frozen in `../../obsidian_archive/`.
 - **Deck writes:** PowerPoint must be **closed** (a `~$dplm.pptx` lock file means
   it's open). Append/replace scripts back up to `/tmp` first and title-match
   slides (robust to index shifts). Never run two pptx-writing steps concurrently.
