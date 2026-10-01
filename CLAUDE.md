@@ -67,10 +67,12 @@ research is the class-conditioning architectures (cross-attention "CA",
 
 ## Conventions
 
-- **Project history & run logs live in the Obsidian vault**
-  (`../../notes/terpene_generation/History.md` and `Runs.md`), NOT in-repo. Record
-  decisions/analysis via the **obsidian-history-notes** / **obsidian-run-notes**
-  skills.
+- **Project history & run logs: repo first (policy 2026-10-01).** Record decisions/analysis
+  in the umbrella repo (`../../docs/HISTORY.md` for the narrative,
+  `../../docs/state/MODEL_SELECTION_STATE.md` for the DPLM variant-selection state,
+  `../../PLAN_AND_OPEN_TASKS.md` for the board). The Obsidian vault
+  (`../../notes/terpene_generation/History.md`, `Runs.md`; skills **obsidian-history-notes** /
+  **obsidian-run-notes**) is only a fallback and the home of pre-2026-10-01 entries.
 - **Deck writes:** PowerPoint must be **closed** (a `~$dplm.pptx` lock file means
   it's open). Append/replace scripts back up to `/tmp` first and title-match
   slides (robust to index shifts). Never run two pptx-writing steps concurrently.
